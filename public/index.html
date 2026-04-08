@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VRO SEO Analyzer</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #242836;
+      --border: #2e3347;
+      --text: #e4e7f1;
+      --text-dim: #8b92a8;
+      --accent: #6366f1;
+      --accent-light: #818cf8;
+      --green: #22c55e;
+      --yellow: #eab308;
+      --orange: #f97316;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --cyan: #06b6d4;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* Layout */
+    .app { display: flex; flex-direction: column; min-height: 100vh; }
+    .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
+    .header h1 { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    .header h1 span { color: var(--accent-light); }
+    .header-actions { display: flex; gap: 12px; align-items: center; }
+    .main { display: flex; flex: 1; }
+    .sidebar { width: 280px; background: var(--surface); border-right: 1px solid var(--border); padding: 20px; overflow-y: auto; flex-shrink: 0; }
+    .content { flex: 1; padding: 24px; overflow-y: auto; }
+
+    /* Status indicators */
+    .status-dots { display: flex; gap: 12px; }
+    .status-dot { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+    .status-dot .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot-ok { background: var(--green); }
+    .dot-off { background: var(--red); opacity: 0.5; }
+    .dot-pending { background: var(--yellow); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    /* Sidebar filters */
+    .filter-group { margin-bottom: 20px; }
+    .filter-group label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 8px; font-weight: 600; }
+    .filter-group select, .filter-group input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+    .filter-group select:focus, .filter-group input:focus { outline: none; border-color: var(--accent); }
+
+    /* Buttons */
+    .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: var(--accent-light); }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--border); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    .btn-icon { background: none; border: 1px solid var(--border); color: var(--text-dim); width: 34px; height: 34px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .btn-icon:hover { background: var(--surface2); color: var(--text); }
+
+    /* Stats bar */
+    .stats-bar { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .stat-card .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 4px; }
+    .stat-card .stat-value { font-size: 28px; font-weight: 700; }
+    .stat-card .stat-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+
+    /* Grade colors */
+    .grade-A { color: var(--green); }
+    .grade-B { color: var(--cyan); }
+    .grade-C { color: var(--yellow); }
+    .grade-D { color: var(--orange); }
+    .grade-F { color: var(--red); }
+
+    /* Recommendations */
+    .rec-card { background: var(--surface2); border-radius: 8px; padding: 14px; margin-bottom: 10px; border-left: 3px solid var(--border); }
+    .rec-card.critical { border-left-color: var(--red); }
+    .rec-card.high { border-left-color: var(--orange); }
+    .rec-card.medium { border-left-color: var(--yellow); }
+    .rec-card.low { border-left-color: var(--blue); }
+    .rec-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .rec-category { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .rec-card.critical .rec-category { color: var(--red); }
+    .rec-card.high .rec-category { color: var(--orange); }
+    .rec-card.medium .rec-category { color: var(--yellow); }
+    .rec-card.low .rec-category { color: var(--blue); }
+    .rec-points { font-size: 11px; background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 10px; color: var(--text-dim); }
+    .rec-action { font-size: 13px; line-height: 1.5; color: var(--text); }
+    .rec-current { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .rec-summary { background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(6,182,212,0.1)); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .rec-summary-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+    .rec-summary-sub { font-size: 12px; color: var(--text-dim); }
+
+    /* Progress bar */
+    .progress-wrap { margin-bottom: 24px; display: none; }
+    .progress-wrap.active { display: block; }
+    .progress-bar-outer { background: var(--surface2); border-radius: 8px; height: 6px; overflow: hidden; }
+    .progress-bar-inner { height: 100%; background: linear-gradient(90deg, var(--accent), var(--cyan)); border-radius: 8px; transition: width 0.3s; }
+    .progress-text { font-size: 12px; color: var(--text-dim); margin-top: 6px; display: flex; justify-content: space-between; }
+
+    /* Table */
+    .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { background: var(--surface2); padding: 10px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); text-align: left; font-weight: 600; position: sticky; top: 0; cursor: pointer; user-select: none; }
+    thead th:hover { color: var(--text); }
+    thead th.sorted::after { content: ' ▼'; font-size: 9px; }
+    thead th.sorted.asc::after { content: ' ▲'; }
+    tbody tr { border-top: 1px solid var(--border); transition: background 0.1s; }
+    tbody tr:hover { background: var(--surface2); }
+    td { padding: 10px 14px; font-size: 13px; }
+    td.center { text-align: center; }
+
+    /* Grade badge */
+    .grade-badge { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; font-weight: 700; font-size: 14px; }
+    .grade-badge.A { background: rgba(34,197,94,0.15); color: var(--green); }
+    .grade-badge.B { background: rgba(6,182,212,0.15); color: var(--cyan); }
+    .grade-badge.C { background: rgba(234,179,8,0.15); color: var(--yellow); }
+    .grade-badge.D { background: rgba(249,115,22,0.15); color: var(--orange); }
+    .grade-badge.F { background: rgba(239,68,68,0.15); color: var(--red); }
+
+    /* Score bar */
+    .score-bar { width: 80px; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
+    .score-bar-fill { height: 100%; border-radius: 3px; }
+    .score-bar-fill.high { background: var(--green); }
+    .score-bar-fill.med { background: var(--yellow); }
+    .score-bar-fill.low { background: var(--red); }
+
+    /* Detail panel */
+    .detail-overlay { position: fixed; top: 0; right: 0; bottom: 0; width: 520px; background: var(--surface); border-left: 1px solid var(--border); z-index: 100; transform: translateX(100%); transition: transform 0.25s ease; overflow-y: auto; padding: 24px; }
+    .detail-overlay.open { transform: translateX(0); }
+    .detail-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99; display: none; }
+    .detail-backdrop.open { display: block; }
+    .detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+    .detail-header h2 { font-size: 18px; }
+    .detail-section { margin-bottom: 20px; }
+    .detail-section h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 10px; font-weight: 600; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .detail-metric { background: var(--surface2); border-radius: 8px; padding: 12px; }
+    .detail-metric .label { font-size: 11px; color: var(--text-dim); margin-bottom: 2px; }
+    .detail-metric .value { font-size: 18px; font-weight: 700; }
+    .issue-list { list-style: none; }
+    .issue-list li { padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; font-size: 13px; display: flex; gap: 8px; align-items: flex-start; }
+    .issue-list li.critical { background: rgba(239,68,68,0.1); color: #fca5a5; }
+    .issue-list li.warning { background: rgba(234,179,8,0.1); color: #fde68a; }
+    .issue-list li.info { background: rgba(59,130,246,0.1); color: #93c5fd; }
+    .issue-icon { font-size: 14px; flex-shrink: 0; }
+
+    /* Empty state */
+    .empty-state { text-align: center; padding: 80px 40px; color: var(--text-dim); }
+    .empty-state h2 { font-size: 22px; color: var(--text); margin-bottom: 8px; }
+    .empty-state p { font-size: 14px; max-width: 400px; margin: 0 auto 20px; line-height: 1.6; }
+
+    /* Tag */
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .tag-birth { background: rgba(99,102,241,0.15); color: var(--accent-light); }
+    .tag-death { background: rgba(239,68,68,0.1); color: #fca5a5; }
+    .tag-marriage { background: rgba(234,179,8,0.1); color: #fde68a; }
+    .tag-divorce { background: rgba(249,115,22,0.1); color: #fdba74; }
+
+    /* Responsive */
+    @media (max-width: 1200px) { .stats-bar { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 900px) { .sidebar { display: none; } .stats-bar { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <div class="app" id="app"></div>
+
+  <script>
+    // ─── State ──────────────────────────────────────────────
+    const state = {
+      pages: [],
+      results: {},        // keyed by "state/cert"
+      analyzing: false,
+      progress: { current: 0, total: 0, currentPage: '' },
+      filter: { state: 'all', cert: 'all', grade: 'all', search: '' },
+      sort: { col: 'state', asc: true },
+      selectedPage: null,
+      apiStatus: { payload: false, ahrefs: false, semrush: false }
+    };
+
+    // ─── Init ───────────────────────────────────────────────
+    async function init() {
+      const [pagesRes, statusRes, savedRes] = await Promise.all([
+        fetch('/api/pages').then(r => r.json()),
+        fetch('/api/status').then(r => r.json()),
+        fetch('/api/results').then(r => r.json()).catch(() => ({}))
+      ]);
+      state.pages = pagesRes.pages;
+      state.apiStatus = statusRes;
+
+      // Load saved results from server (persisted on disk)
+      if (savedRes && Object.keys(savedRes).length > 0) {
+        state.results = savedRes;
+      }
+
+      render();
+    }
+
+    function saveResults() {
+      // Results are now saved server-side automatically on each analysis
+    }
+
+    // ─── Analysis ───────────────────────────────────────────
+    async function analyzeSingle(s, cert) {
+      const key = `${s}/${cert}`;
+      try {
+        const res = await fetch(`/api/analyze/${s}/${cert}`);
+        const data = await res.json();
+        if (!data.error) {
+          state.results[key] = data;
+          // Server auto-saves to data/results.json
+        }
+        return data;
+      } catch(e) {
+        return { error: e.message };
+      }
+    }
+
+    async function saveSnapshot() {
+      const res = await fetch('/api/snapshot', { method: 'POST' });
+      const data = await res.json();
+      alert(`Snapshot saved! (${data.snapshots} total snapshots in history)`);
+    }
+
+    // Batch control flags
+    let batchPaused = false;
+    let batchStopped = false;
+
+    function pauseBatch() { batchPaused = true; render(); }
+    function resumeBatch() { batchPaused = false; render(); }
+    function stopBatch() { batchStopped = true; batchPaused = false; }
+
+    async function waitWhilePaused() {
+      while (batchPaused && !batchStopped) {
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+
+    async function runBatch(pages) {
+      batchPaused = false;
+      batchStopped = false;
+      state.analyzing = true;
+      state.progress = { current: 0, total: pages.length, currentPage: '' };
+      render();
+
+      for (const page of pages) {
+        if (batchStopped) break;
+        await waitWhilePaused();
+        if (batchStopped) break;
+
+        state.progress.currentPage = `${page.stateName} ${page.certName}`;
+        state.progress.current++;
+        render();
+
+        await analyzeSingle(page.state, page.cert);
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      state.analyzing = false;
+      batchPaused = false;
+      batchStopped = false;
+      render();
+    }
+
+    async function analyzeAll() { await runBatch(getFilteredPages()); }
+    async function analyzeSelected(pages) { await runBatch(pages); }
+
+    // ─── Filtering & Sorting ────────────────────────────────
+    function getFilteredPages() {
+      let filtered = [...state.pages];
+      if (state.filter.state !== 'all') filtered = filtered.filter(p => p.state === state.filter.state);
+      if (state.filter.cert !== 'all') filtered = filtered.filter(p => p.cert === state.filter.cert);
+      if (state.filter.search) {
+        const q = state.filter.search.toLowerCase();
+        filtered = filtered.filter(p => p.stateName.toLowerCase().includes(q) || p.certName.toLowerCase().includes(q));
+      }
+      if (state.filter.grade !== 'all') {
+        filtered = filtered.filter(p => {
+          const r = state.results[`${p.state}/${p.cert}`];
+          if (!r) return state.filter.grade === 'unscored';
+          return r.rating?.grade === state.filter.grade || r.onPage?.grade === state.filter.grade;
+        });
+      }
+
+      // Sort
+      filtered.sort((a, b) => {
+        const rA = state.results[`${a.state}/${a.cert}`];
+        const rB = state.results[`${b.state}/${b.cert}`];
+        let vA, vB;
+        switch(state.sort.col) {
+          case 'state': vA = a.stateName; vB = b.stateName; break;
+          case 'cert': vA = a.cert; vB = b.cert; break;
+          case 'score': vA = rA?.onPage?.total || 0; vB = rB?.onPage?.total || 0; break;
+          case 'grade': vA = rA?.rating?.grade || 'Z'; vB = rB?.rating?.grade || 'Z'; break;
+          case 'words': vA = rA?.onPage?.meta?.wordCount || 0; vB = rB?.onPage?.meta?.wordCount || 0; break;
+          case 'faqs': vA = rA?.onPage?.meta?.faqCount || 0; vB = rB?.onPage?.meta?.faqCount || 0; break;
+          case 'issues': vA = rA?.onPage?.issues?.length || 0; vB = rB?.onPage?.issues?.length || 0; break;
+          default: vA = a.stateName; vB = b.stateName;
+        }
+        if (typeof vA === 'string') return state.sort.asc ? vA.localeCompare(vB) : vB.localeCompare(vA);
+        return state.sort.asc ? vA - vB : vB - vA;
+      });
+
+      return filtered;
+    }
+
+    function getStats() {
+      const results = Object.values(state.results);
+      const grades = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+      let totalScore = 0;
+      for (const r of results) {
+        const g = r.rating?.grade || r.onPage?.grade;
+        if (g && grades[g] !== undefined) grades[g]++;
+        totalScore += r.onPage?.total || 0;
+      }
+      return {
+        total: state.pages.length,
+        analyzed: results.length,
+        avgScore: results.length > 0 ? Math.round(totalScore / results.length) : 0,
+        grades,
+        issues: results.reduce((sum, r) => sum + (r.onPage?.issues?.filter(i => i.severity === 'critical').length || 0), 0)
+      };
+    }
+
+    // ─── Export ──────────────────────────────────────────────
+    function exportCSV() {
+      const results = Object.values(state.results);
+      if (!results.length) return alert('No results to export. Run analysis first.');
+
+      const header = 'State,Certificate,URL,On-Page Score,Grade,Word Count,FAQ Count,H2 Count,Critical Issues,Warnings,Meta Title Length,Meta Desc Length,Final Score,Final Grade\n';
+      const rows = results.map(r => {
+        const op = r.onPage || {};
+        const rt = r.rating || {};
+        const criticals = (op.issues || []).filter(i => i.severity === 'critical').length;
+        const warnings = (op.issues || []).filter(i => i.severity === 'warning').length;
+        return [
+          r.state, r.cert, r.url,
+          op.total, op.grade, op.meta?.wordCount || 0, op.meta?.faqCount || 0, (op.meta?.h2s || []).length,
+          criticals, warnings,
+          (op.meta?.metaTitle || '').length, (op.meta?.metaDesc || '').length,
+          rt.normalizedScore || op.total, rt.grade || op.grade
+        ].join(',');
+      }).join('\n');
+
+      const blob = new Blob([header + rows], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `vro-seo-analysis-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click(); URL.revokeObjectURL(url);
+    }
+
+    // ─── Render ─────────────────────────────────────────────
+    function render() {
+      const stats = getStats();
+      const filtered = getFilteredPages();
+      const uniqueStates = [...new Set(state.pages.map(p => p.state))].sort();
+
+      document.getElementById('app').innerHTML = `
+        <div class="header">
+          <h1>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>VRO</span> SEO Analyzer
+          </h1>
+          <div class="header-actions">
+            <div class="status-dots">
+              <div class="status-dot"><div class="dot ${state.apiStatus.payload ? 'dot-ok' : 'dot-off'}"></div>Payload</div>
+              <div class="status-dot"><div class="dot ${state.apiStatus.ahrefs ? 'dot-ok' : 'dot-off'}"></div>Ahrefs</div>
+              <div class="status-dot"><div class="dot ${state.apiStatus.semrush ? 'dot-ok' : 'dot-off'}"></div>SEMrush</div>
+            </div>
+            <button class="btn btn-secondary" onclick="saveSnapshot()">Save Snapshot</button>
+            <button class="btn btn-secondary" onclick="exportCSV()">Export CSV</button>
+            ${state.analyzing
+              ? `<button class="btn btn-primary" disabled style="opacity:0.7">
+                  ${batchPaused ? '⏸ Paused' : '⟳ Running'} (${state.progress.current}/${state.progress.total})
+                </button>`
+              : `<button class="btn btn-primary" onclick="analyzeAll()">Analyze All</button>`
+            }
+          </div>
+        </div>
+        <div class="main">
+          <div class="sidebar">
+            <div class="filter-group">
+              <label>Search</label>
+              <input type="text" placeholder="Filter by state or cert..." value="${state.filter.search}" oninput="state.filter.search=this.value; render()">
+            </div>
+            <div class="filter-group">
+              <label>State</label>
+              <select onchange="state.filter.state=this.value; render()">
+                <option value="all">All States (${uniqueStates.length})</option>
+                ${uniqueStates.map(s => `<option value="${s}" ${state.filter.state===s?'selected':''}>${s.split('-').map(w=>w[0].toUpperCase()+w.slice(1)).join(' ')}</option>`).join('')}
+              </select>
+            </div>
+            <div class="filter-group">
+              <label>Certificate Type</label>
+              <select onchange="state.filter.cert=this.value; render()">
+                <option value="all">All Types</option>
+                <option value="birth-certificate" ${state.filter.cert==='birth-certificate'?'selected':''}>Birth</option>
+                <option value="death-certificate" ${state.filter.cert==='death-certificate'?'selected':''}>Death</option>
+                <option value="marriage-certificate" ${state.filter.cert==='marriage-certificate'?'selected':''}>Marriage</option>
+                <option value="divorce-certificate" ${state.filter.cert==='divorce-certificate'?'selected':''}>Divorce</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label>Grade</label>
+              <select onchange="state.filter.grade=this.value; render()">
+                <option value="all">All Grades</option>
+                <option value="A" ${state.filter.grade==='A'?'selected':''}>A (85+)</option>
+                <option value="B" ${state.filter.grade==='B'?'selected':''}>B (70-84)</option>
+                <option value="C" ${state.filter.grade==='C'?'selected':''}>C (55-69)</option>
+                <option value="D" ${state.filter.grade==='D'?'selected':''}>D (40-54)</option>
+                <option value="F" ${state.filter.grade==='F'?'selected':''}>F (0-39)</option>
+                <option value="unscored" ${state.filter.grade==='unscored'?'selected':''}>Not Analyzed</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label>Quick Actions</label>
+              <button class="btn btn-secondary" style="width:100%;margin-bottom:8px" onclick="analyzeUnscored()">Analyze Unscored Only</button>
+              <button class="btn btn-secondary" style="width:100%;margin-bottom:8px" onclick="analyzeFiltered()">Analyze Filtered (${filtered.length})</button>
+              <button class="btn btn-secondary" style="width:100%;color:var(--red)" onclick="if(confirm('Clear all results?')){state.results={};saveResults();render();}">Clear All Results</button>
+            </div>
+            <div class="filter-group">
+              <label>Grade Distribution</label>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                ${['A','B','C','D','F'].map(g => `
+                  <div style="text-align:center;flex:1;min-width:40px">
+                    <div class="grade-badge ${g}" style="width:100%;margin-bottom:4px">${stats.grades[g]}</div>
+                    <div style="font-size:11px;color:var(--text-dim)">${g}</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+          <div class="content">
+            <div class="stats-bar">
+              <div class="stat-card"><div class="stat-label">Total Pages</div><div class="stat-value">${stats.total}</div></div>
+              <div class="stat-card"><div class="stat-label">Analyzed</div><div class="stat-value">${stats.analyzed}</div><div class="stat-sub">${stats.total > 0 ? Math.round(stats.analyzed/stats.total*100) : 0}%</div></div>
+              <div class="stat-card"><div class="stat-label">Avg Score</div><div class="stat-value ${stats.avgScore >= 70 ? 'grade-A' : stats.avgScore >= 55 ? 'grade-C' : 'grade-F'}">${stats.avgScore}</div></div>
+              <div class="stat-card"><div class="stat-label">Critical Issues</div><div class="stat-value" style="color:var(--red)">${stats.issues}</div></div>
+              <div class="stat-card"><div class="stat-label">Showing</div><div class="stat-value">${filtered.length}</div><div class="stat-sub">of ${stats.total}</div></div>
+              <div class="stat-card"><div class="stat-label">Data Sources</div><div class="stat-value" style="font-size:16px">${[state.apiStatus.payload?'CMS':'',state.apiStatus.ahrefs?'Ahrefs':'',state.apiStatus.semrush?'SEMrush':''].filter(Boolean).join(', ')||'CMS only'}</div></div>
+            </div>
+
+            <div class="progress-wrap ${state.analyzing?'active':''}">
+              <div class="progress-bar-outer"><div class="progress-bar-inner" style="width:${state.progress.total>0?Math.round(state.progress.current/state.progress.total*100):0}%"></div></div>
+              <div class="progress-text">
+                <span>${batchPaused ? '⏸ Paused' : 'Analyzing'}: ${state.progress.currentPage}</span>
+                <span style="display:flex;align-items:center;gap:8px">
+                  ${state.progress.current} / ${state.progress.total}
+                  ${batchPaused
+                    ? `<button class="btn btn-sm btn-primary" onclick="resumeBatch()">Resume</button>`
+                    : `<button class="btn btn-sm btn-secondary" onclick="pauseBatch()">Pause</button>`
+                  }
+                  <button class="btn btn-sm btn-secondary" style="color:var(--red);border-color:var(--red)" onclick="stopBatch()">Stop</button>
+                </span>
+              </div>
+            </div>
+
+            ${filtered.length === 0 && stats.analyzed === 0 ? `
+              <div class="empty-state">
+                <h2>Ready to Analyze</h2>
+                <p>Click "Analyze All" to scan all ${stats.total} state/certificate pages. Each page will be scored on meta tags, headings, content quality, FAQs, and more.</p>
+                <button class="btn btn-primary" onclick="analyzeAll()" style="font-size:15px;padding:12px 24px">Start Full Analysis</button>
+              </div>
+            ` : `
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th onclick="toggleSort('state')" class="${state.sort.col==='state'?'sorted'+(state.sort.asc?' asc':''):''}">State</th>
+                      <th onclick="toggleSort('cert')" class="${state.sort.col==='cert'?'sorted'+(state.sort.asc?' asc':''):''}">Certificate</th>
+                      <th onclick="toggleSort('grade')" class="${state.sort.col==='grade'?'sorted'+(state.sort.asc?' asc':''):''}">Grade</th>
+                      <th onclick="toggleSort('score')" class="${state.sort.col==='score'?'sorted'+(state.sort.asc?' asc':''):''}">Score</th>
+                      <th onclick="toggleSort('words')" class="${state.sort.col==='words'?'sorted'+(state.sort.asc?' asc':''):''}">Words</th>
+                      <th onclick="toggleSort('faqs')" class="${state.sort.col==='faqs'?'sorted'+(state.sort.asc?' asc':''):''}">FAQs</th>
+                      <th onclick="toggleSort('issues')" class="${state.sort.col==='issues'?'sorted'+(state.sort.asc?' asc':''):''}">Issues</th>
+                      <th>Top Fix</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${filtered.map(p => {
+                      const key = `${p.state}/${p.cert}`;
+                      const r = state.results[key];
+                      const certTag = p.cert.split('-')[0];
+                      return `<tr onclick="showDetail('${p.state}','${p.cert}')" style="cursor:pointer">
+                        <td><strong>${p.stateName}</strong></td>
+                        <td><span class="tag tag-${certTag}">${certTag.toUpperCase()}</span></td>
+                        <td class="center">${r ? `<span class="grade-badge ${r.rating?.grade||r.onPage?.grade}">${r.rating?.grade||r.onPage?.grade}</span>` : '<span style="color:var(--text-dim)">—</span>'}</td>
+                        <td>${r ? `<span class="score-bar"><span class="score-bar-fill ${r.onPage?.total>=70?'high':r.onPage?.total>=40?'med':'low'}" style="width:${r.onPage?.total}%"></span></span>${r.onPage?.total}` : '—'}</td>
+                        <td class="center">${r ? r.onPage?.meta?.wordCount || '—' : '—'}</td>
+                        <td class="center">${r ? r.onPage?.meta?.faqCount || '0' : '—'}</td>
+                        <td class="center">${r ? `<span style="color:${r.onPage?.issues?.filter(i=>i.severity==='critical').length>0?'var(--red)':'var(--text-dim)'}">${r.onPage?.issues?.length || 0}</span>` : '—'}</td>
+                        <td style="max-width:180px;font-size:11px;color:var(--text-dim)">${r?.onPage?.recommendations?.[0] ? `<span style="color:${r.onPage.recommendations[0].priority==='critical'?'var(--red)':r.onPage.recommendations[0].priority==='high'?'var(--orange)':'var(--yellow)'}">${r.onPage.recommendations[0].category}</span> (+${r.onPage.recommendations[0].points}pts)` : (r ? '<span style="color:var(--green)">A rank</span>' : '—')}</td>
+                        <td><button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();analyzeSingle('${p.state}','${p.cert}').then(()=>render())">Scan</button></td>
+                      </tr>`;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        </div>
+
+        <!-- Detail panel -->
+        <div class="detail-backdrop ${state.selectedPage?'open':''}" onclick="closeDetail()"></div>
+        <div class="detail-overlay ${state.selectedPage?'open':''}">
+          ${state.selectedPage ? renderDetail() : ''}
+        </div>
+      `;
+    }
+
+    function renderDetail() {
+      const r = state.selectedPage;
+      if (!r) return '';
+      const op = r.onPage || {};
+      const ah = r.ahrefs || {};
+      const sm = r.semrush || {};
+      const rt = r.rating || {};
+
+      return `
+        <div class="detail-header">
+          <div>
+            <h2>${r.state?.split('-').map(w=>w[0].toUpperCase()+w.slice(1)).join(' ')} ${r.cert?.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}</h2>
+            <a href="${r.url}" target="_blank" style="color:var(--accent-light);font-size:13px">${r.url}</a>
+          </div>
+          <button class="btn-icon" onclick="closeDetail()">✕</button>
+        </div>
+
+        <div class="detail-section">
+          <h3>Overall Rating</h3>
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
+            <span class="grade-badge ${rt.grade||op.grade}" style="width:56px;height:56px;font-size:24px">${rt.grade||op.grade}</span>
+            <div>
+              <div style="font-size:28px;font-weight:700">${rt.normalizedScore||op.total}/100</div>
+              <div style="font-size:12px;color:var(--text-dim)">On-page: ${op.total}/100</div>
+            </div>
+          </div>
+        </div>
+
+        ${(op.recommendations || []).length > 0 ? `
+        <div class="detail-section">
+          <h3>How to Reach A Rank</h3>
+          <div class="rec-summary">
+            <div class="rec-summary-title">${op.pointsToA > 0 ? `+${op.pointsToA} points needed to reach A` : 'Already at A rank!'}</div>
+            <div class="rec-summary-sub">${op.recommendations.length} recommendation${op.recommendations.length > 1 ? 's' : ''} — fix the top ${Math.min(3, op.recommendations.length)} to get there fastest</div>
+          </div>
+          ${op.recommendations.map((rec, idx) => `
+            <div class="rec-card ${rec.priority}">
+              <div class="rec-header">
+                <span class="rec-category">${rec.priority === 'critical' ? '🔴' : rec.priority === 'high' ? '🟠' : rec.priority === 'medium' ? '🟡' : '🔵'} ${rec.category}</span>
+                <span class="rec-points">+${rec.points} pts</span>
+              </div>
+              <div class="rec-action">${rec.action}</div>
+              ${rec.current ? `<div class="rec-current">Current: ${rec.current}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+        ` : ''}
+
+        <div class="detail-section">
+          <h3>Score Breakdown</h3>
+          <div class="detail-grid">
+            ${Object.entries(op.scores||{}).map(([k,v]) => {
+              const labels = {metaTitle:'Meta Title',metaDesc:'Meta Description',h1:'H1 Heading',h2Quality:'H2 Quality',contentLength:'Content Length',faq:'FAQ Section',internalLinks:'Internal Links',imageOpt:'Images',schemaReady:'Schema Ready'};
+              const maxes = {metaTitle:15,metaDesc:10,h1:10,h2Quality:15,contentLength:10,faq:20,internalLinks:10,imageOpt:5,schemaReady:5};
+              return `<div class="detail-metric"><div class="label">${labels[k]||k}</div><div class="value">${v}/${maxes[k]||'?'}</div></div>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <div class="detail-section">
+          <h3>Page Metrics</h3>
+          <div class="detail-grid">
+            <div class="detail-metric"><div class="label">Word Count</div><div class="value">${op.meta?.wordCount||'—'}</div></div>
+            <div class="detail-metric"><div class="label">FAQ Count</div><div class="value">${op.meta?.faqCount||0}</div></div>
+            <div class="detail-metric"><div class="label">H2 Headings</div><div class="value">${(op.meta?.h2s||[]).length}</div></div>
+            <div class="detail-metric"><div class="label">Internal Links</div><div class="value">${op.meta?.internalLinkCount||0}</div></div>
+          </div>
+        </div>
+
+        ${ah.available ? `
+        <div class="detail-section">
+          <h3>Ahrefs Data</h3>
+          <div class="detail-grid">
+            <div class="detail-metric"><div class="label">Organic Traffic</div><div class="value">${ah.organicTraffic||0}</div></div>
+            <div class="detail-metric"><div class="label">Backlinks</div><div class="value">${ah.backlinks||0}</div></div>
+            <div class="detail-metric"><div class="label">Ref Domains</div><div class="value">${ah.referringDomains||0}</div></div>
+            <div class="detail-metric"><div class="label">Keywords</div><div class="value">${(ah.organicKeywords||[]).length}</div></div>
+          </div>
+        </div>` : ''}
+
+        ${sm.available ? `
+        <div class="detail-section">
+          <h3>SEMrush Data</h3>
+          <div class="detail-grid">
+            <div class="detail-metric"><div class="label">Keywords</div><div class="value">${sm.keywordCount||0}</div></div>
+            <div class="detail-metric"><div class="label">Total Traffic</div><div class="value">${Math.round(sm.totalTraffic||0)}</div></div>
+            <div class="detail-metric"><div class="label">Top 10 KWs</div><div class="value">${sm.topPositions||0}</div></div>
+            <div class="detail-metric"><div class="label">Avg Position</div><div class="value">${sm.avgPosition||'—'}</div></div>
+          </div>
+        </div>` : ''}
+
+        <div class="detail-section">
+          <h3>Issues (${(op.issues||[]).length})</h3>
+          <ul class="issue-list">
+            ${(op.issues||[]).map(i => `
+              <li class="${i.severity}">
+                <span class="issue-icon">${i.severity==='critical'?'🔴':i.severity==='warning'?'🟡':'🔵'}</span>
+                ${i.msg}
+              </li>
+            `).join('')}
+            ${(op.issues||[]).length === 0 ? '<li style="color:var(--text-dim)">No issues found</li>' : ''}
+          </ul>
+        </div>
+
+        <div class="detail-section">
+          <h3>H2 Headings</h3>
+          <ul style="list-style:none">
+            ${(op.meta?.h2s||[]).map(h => `<li style="padding:4px 0;font-size:13px;color:var(--text-dim)">• ${h}</li>`).join('')}
+            ${(op.meta?.h2s||[]).length === 0 ? '<li style="color:var(--text-dim)">None found</li>' : ''}
+          </ul>
+        </div>
+
+        ${(op.meta?.faqQuestions||[]).length > 0 ? `
+        <div class="detail-section">
+          <h3>FAQ Questions</h3>
+          <ul style="list-style:none">
+            ${op.meta.faqQuestions.map(q => `<li style="padding:4px 0;font-size:13px;color:var(--text-dim)">• ${q}</li>`).join('')}
+          </ul>
+        </div>` : ''}
+      `;
+    }
+
+    // ─── Interactions ───────────────────────────────────────
+    function toggleSort(col) {
+      if (state.sort.col === col) state.sort.asc = !state.sort.asc;
+      else { state.sort.col = col; state.sort.asc = true; }
+      render();
+    }
+
+    function showDetail(s, cert) {
+      const key = `${s}/${cert}`;
+      const r = state.results[key];
+      if (r) { state.selectedPage = r; }
+      else { state.selectedPage = { state: s, cert, url: `https://www.vitalrecordsonline.com/${s}/${cert}`, onPage: {scores:{},total:0,grade:'—',issues:[],meta:{}}, rating: {grade:'—'} }; }
+      render();
+    }
+
+    function closeDetail() {
+      state.selectedPage = null;
+      render();
+    }
+
+    async function analyzeUnscored() {
+      const unscored = state.pages.filter(p => !state.results[`${p.state}/${p.cert}`]);
+      if (!unscored.length) return alert('All pages already analyzed!');
+      await analyzeSelected(unscored);
+    }
+
+    async function analyzeFiltered() {
+      const filtered = getFilteredPages();
+      if (!filtered.length) return alert('No pages match current filters.');
+      await analyzeSelected(filtered);
+    }
+
+    // ─── Start ──────────────────────────────────────────────
+    init();
+  </script>
+</body>
+</html>
