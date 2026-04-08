@@ -26,10 +26,10 @@ let tokenExpiry  = 0;
 const SESSION_TIMEOUT = 24 * 60 * 60 * 1000; // 24 hours
 
 const CREDENTIALS = {
-  'guillaume': 'Vr0-S3o@2026!',
-  'marketing': 'Mkt-An4lyz#24',
-  'developer': 'D3v-Vr0$eoTool',
-  'viewer': 'V1ew-0nly!Seo'
+  'guillaume': 'xK9#mPvR!2026q',
+  'marketing': 'Wt7$nLcB@seoMk',
+  'developer': 'Jf3&hZdQ*dev08',
+  'viewer': 'Rn5!bYgA#view2'
 };
 
 const sessions = {}; // { token: { username, createdAt } }
@@ -612,11 +612,23 @@ async function fetchAhrefsData(url) {
     );
     const blData = await blRes.json();
 
+    // Parse organic keywords into standardized format for SERP tracking
+    const rawKeywords = kwData.keywords || [];
+    const keywords = rawKeywords.map(k => ({
+      keyword: k.keyword || '',
+      position: k.position || 0,
+      volume: k.volume || 0,
+      traffic: k.traffic || 0
+    })).filter(k => k.keyword);
+
     return {
       available: true,
       domainRating: metrics.metrics?.domain_rating || null,
-      organicKeywords: kwData.keywords || [],
-      organicTraffic: kwData.metrics?.organic_traffic || 0,
+      organicKeywords: rawKeywords,
+      keywords, // standardized keyword list for SERP tracking
+      keywordCount: keywords.length,
+      totalTraffic: keywords.reduce((sum, k) => sum + (k.traffic || 0), 0),
+      organicTraffic: kwData.metrics?.organic_traffic || keywords.reduce((sum, k) => sum + (k.traffic || 0), 0),
       backlinks: blData.metrics?.live || 0,
       referringDomains: blData.metrics?.live_refdomains || 0
     };
@@ -776,26 +788,25 @@ app.get('/api/analyze/:state/:cert', async (req, res) => {
     // 4. Ahrefs data
     const ahrefs = await fetchAhrefsData(liveUrl);
 
-    // 5. SEMrush data with keyword position tracking
-    const semrush = await fetchSemrushData(liveUrl);
-
-    // Record SERP positions and calculate movement
-    if (semrush.available && semrush.keywords.length > 0) {
-      recordSerpPosition(liveUrl, semrush.keywords);
-      const serpMovement = getSerpMovement(liveUrl, semrush.keywords);
-      semrush.serpData = {
-        keywords: serpMovement.keywords.slice(0, 10), // top 10 keywords with movement
+    // 5. SERP position tracking using Ahrefs keyword data
+    if (ahrefs.available && ahrefs.keywords && ahrefs.keywords.length > 0) {
+      recordSerpPosition(liveUrl, ahrefs.keywords);
+      const serpMovement = getSerpMovement(liveUrl, ahrefs.keywords);
+      ahrefs.serpData = {
+        keywords: serpMovement.keywords.slice(0, 10),
         dailyChange: serpMovement.dailyChange,
         weeklyChange: serpMovement.weeklyChange
       };
-      // Keyword position overview
-      semrush.keywordsTop1 = serpMovement.keywords.filter(k => k.position === 1).length;
-      semrush.keywordsTop3 = serpMovement.keywords.filter(k => k.position <= 3).length;
-      semrush.keywordsTop10 = serpMovement.keywords.filter(k => k.position <= 10).length;
-      semrush.keywordsTop100 = serpMovement.keywords.filter(k => k.position <= 100).length;
+      ahrefs.keywordsTop1 = serpMovement.keywords.filter(k => k.position === 1).length;
+      ahrefs.keywordsTop3 = serpMovement.keywords.filter(k => k.position <= 3).length;
+      ahrefs.keywordsTop10 = serpMovement.keywords.filter(k => k.position <= 10).length;
+      ahrefs.keywordsTop100 = serpMovement.keywords.filter(k => k.position <= 100).length;
     }
 
-    // 6. Combined rating
+    // 6. SEMrush data (optional, skipped if no key)
+    const semrush = await fetchSemrushData(liveUrl);
+
+    // 7. Combined rating
     const rating = computeFinalRating(onPage, ahrefs, semrush);
 
     const result = {
@@ -853,21 +864,21 @@ app.post('/api/analyze-batch', async (req, res) => {
 
       const onPage = scoreOnPageSEO(page, blockData);
       const ahrefs = await fetchAhrefsData(liveUrl);
-      const semrush = await fetchSemrushData(liveUrl);
 
-      // Record SERP positions
-      if (semrush.available && semrush.keywords.length > 0) {
-        recordSerpPosition(liveUrl, semrush.keywords);
-        const serpMovement = getSerpMovement(liveUrl, semrush.keywords);
-        semrush.keywordsTop1 = serpMovement.keywords.filter(k => k.position === 1).length;
-        semrush.keywordsTop3 = serpMovement.keywords.filter(k => k.position <= 3).length;
-        semrush.keywordsTop10 = serpMovement.keywords.filter(k => k.position <= 10).length;
-        semrush.keywordsTop100 = serpMovement.keywords.filter(k => k.position <= 100).length;
+      // Record SERP positions from Ahrefs
+      if (ahrefs.available && ahrefs.keywords && ahrefs.keywords.length > 0) {
+        recordSerpPosition(liveUrl, ahrefs.keywords);
+        const serpMovement = getSerpMovement(liveUrl, ahrefs.keywords);
+        ahrefs.keywordsTop1 = serpMovement.keywords.filter(k => k.position === 1).length;
+        ahrefs.keywordsTop3 = serpMovement.keywords.filter(k => k.position <= 3).length;
+        ahrefs.keywordsTop10 = serpMovement.keywords.filter(k => k.position <= 10).length;
+        ahrefs.keywordsTop100 = serpMovement.keywords.filter(k => k.position <= 100).length;
       }
 
+      const semrush = await fetchSemrushData(liveUrl);
       const rating = computeFinalRating(onPage, ahrefs, semrush);
 
-      res.write(`data: ${JSON.stringify({ i, state, cert, url: liveUrl, onPage, ahrefs: { available: ahrefs.available }, semrush: { available: semrush.available, keywordsTop1: semrush.keywordsTop1, keywordsTop3: semrush.keywordsTop3, keywordsTop10: semrush.keywordsTop10 }, rating, analyzedAt: new Date().toISOString() })}\n\n`);
+      res.write(`data: ${JSON.stringify({ i, state, cert, url: liveUrl, onPage, ahrefs: { available: ahrefs.available, keywordsTop1: ahrefs.keywordsTop1, keywordsTop3: ahrefs.keywordsTop3, keywordsTop10: ahrefs.keywordsTop10, keywordCount: ahrefs.keywordCount }, semrush: { available: semrush.available }, rating, analyzedAt: new Date().toISOString() })}\n\n`);
     } catch (e) {
       res.write(`data: ${JSON.stringify({ i, state, cert, error: e.message })}\n\n`);
     }

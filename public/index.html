@@ -455,11 +455,7 @@
                 <button type="submit" style="width: 100%; padding: 10px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; background: var(--accent); color: white; transition: all 0.15s">Sign In</button>
               </form>
               <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-dim); line-height: 1.6">
-                <p style="margin: 0 0 8px 0"><strong style="color: var(--text)">Demo Accounts:</strong></p>
-                <p style="margin: 0 0 4px 0">guillaume / Vr0-S3o@2026!</p>
-                <p style="margin: 0 0 4px 0">marketing / Mkt-An4lyz#24</p>
-                <p style="margin: 0 0 4px 0">developer / D3v-Vr0\$eoTool</p>
-                <p style="margin: 0">viewer / V1ew-0nly!Seo</p>
+                <p style="margin: 0"><strong style="color: var(--text)">VRO SEO Analyzer</strong> — Contact admin for credentials</p>
               </div>
             </div>
           </div>
@@ -657,12 +653,12 @@
           </div>
         </div>
 
-        ${sm.serpData && sm.serpData.keywords && sm.serpData.keywords.length > 0 ? `
         <div class="detail-section">
-          <h3>SERP Position Movement</h3>
+          <h3>SERP Position Movement <span style="font-size:11px;color:var(--text-dim)">(via Ahrefs)</span></h3>
+          ${ah.serpData && ah.serpData.keywords && ah.serpData.keywords.length > 0 ? `
           <div style="margin-bottom: 12px">
-            <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px">Top 10 Keywords</div>
-            ${sm.serpData.keywords.slice(0, 10).map(k => {
+            <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px">Top 10 Keywords — <span style="font-size:10px">Day ▲▼ | Week ▲▼</span></div>
+            ${ah.serpData.keywords.slice(0, 10).map(k => {
               const dailyArrow = k.dailyMovement > 0 ? '▲' : k.dailyMovement < 0 ? '▼' : '─';
               const weeklyArrow = k.weeklyMovement > 0 ? '▲' : k.weeklyMovement < 0 ? '▼' : '─';
               const dailyColor = k.dailyMovement > 0 ? 'var(--green)' : k.dailyMovement < 0 ? 'var(--red)' : 'var(--text-dim)';
@@ -684,38 +680,56 @@
               `;
             }).join('')}
           </div>
+          ` : ah.keywords && ah.keywords.length > 0 ? `
+          <div style="margin-bottom: 12px">
+            <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px">Keywords found — movement tracking starts after 2nd scan</div>
+            ${ah.keywords.slice(0, 10).map(k => `
+              <div style="background: var(--surface2); border-radius: 6px; padding: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center">
+                <div style="flex: 1">
+                  <div style="font-size: 13px; color: var(--text); margin-bottom: 2px">${k.keyword}</div>
+                  <div style="font-size: 11px; color: var(--text-dim)">Vol: ${k.volume || 0} • Traffic: ${k.traffic || 0}</div>
+                </div>
+                <div style="text-align: right">
+                  <div style="font-size: 14px; font-weight: 700; color: var(--accent-light)">Pos #${k.position}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          ` : `
+          <div style="background: var(--surface2); border-radius: 8px; padding: 20px; text-align: center">
+            <div style="font-size: 14px; color: var(--text-dim); margin-bottom: 8px">No keyword data available</div>
+            <div style="font-size: 12px; color: var(--text-dim)">Ahrefs hasn't found organic keywords for this URL yet. The page may be new or not ranking.</div>
+          </div>
+          `}
         </div>
-        ` : ''}
 
-        ${sm.keywordsTop1 !== undefined ? `
         <div class="detail-section">
           <h3>Keyword Position Overview</h3>
           <div class="detail-grid" style="grid-template-columns: repeat(4, 1fr)">
             <div class="detail-metric" style="border: 2px solid var(--green)">
               <div class="label">Top 1</div>
-              <div class="value" style="color: var(--green)">${sm.keywordsTop1 || 0}</div>
+              <div class="value" style="color: var(--green)">${ah.keywordsTop1 || 0}</div>
             </div>
             <div class="detail-metric" style="border: 2px solid var(--cyan)">
               <div class="label">Top 3</div>
-              <div class="value" style="color: var(--cyan)">${sm.keywordsTop3 || 0}</div>
+              <div class="value" style="color: var(--cyan)">${ah.keywordsTop3 || 0}</div>
             </div>
             <div class="detail-metric" style="border: 2px solid var(--yellow)">
               <div class="label">Top 10</div>
-              <div class="value" style="color: var(--yellow)">${sm.keywordsTop10 || 0}</div>
+              <div class="value" style="color: var(--yellow)">${ah.keywordsTop10 || 0}</div>
             </div>
             <div class="detail-metric" style="border: 2px solid var(--blue)">
               <div class="label">Top 100</div>
-              <div class="value" style="color: var(--blue)">${sm.keywordsTop100 || 0}</div>
+              <div class="value" style="color: var(--blue)">${ah.keywordsTop100 || 0}</div>
             </div>
           </div>
         </div>
-        ` : ''}
 
-        ${(op.recommendations || []).length > 0 ? `
         <div class="detail-section">
-          <h3>How to Reach A Rank</h3>
+          <h3>SEO Recommendations</h3>
+          ${(op.recommendations || []).length > 0 ? `
           <div class="rec-summary">
-            <div class="rec-summary-title">${op.pointsToA > 0 ? `+${op.pointsToA} points needed to reach A` : 'Already at A rank!'}</div>
+            <div class="rec-summary-title">${op.pointsToA > 0 ? `+${op.pointsToA} points needed to reach A` : 'On-page is perfect! Focus on off-page SEO below.'}</div>
             <div class="rec-summary-sub">${op.recommendations.length} recommendation${op.recommendations.length > 1 ? 's' : ''} — fix the top ${Math.min(3, op.recommendations.length)} to get there fastest</div>
           </div>
           ${op.recommendations.map((rec, idx) => `
@@ -728,8 +742,23 @@
               ${rec.current ? `<div class="rec-current">Current: ${rec.current}</div>` : ''}
             </div>
           `).join('')}
+          ` : `
+          <div class="rec-summary">
+            <div class="rec-summary-title" style="color:var(--green)">✓ On-page SEO is perfect (100/100)</div>
+            <div class="rec-summary-sub">Focus on off-page factors to improve overall ranking</div>
+          </div>
+          `}
+          ${(() => {
+            const offPageRecs = [];
+            if (!ah.available || (ah.keywordCount || 0) === 0) offPageRecs.push({priority:'high',category:'Keyword Visibility',action:'Ahrefs shows 0 keywords for this page. This may mean the page is new, not yet indexed, or not ranking for any terms. Ensure the page is submitted to Google Search Console and has quality backlinks pointing to it.',icon:'🟠'});
+            if ((ah.keywordCount || 0) > 0 && (ah.keywordsTop10 || 0) === 0) offPageRecs.push({priority:'high',category:'Rankings',action:'This page has ' + ah.keywordCount + ' keywords but none in the top 10. Focus on building backlinks and improving content depth to push rankings higher.',icon:'🟠'});
+            if (!ah.available || (ah.backlinks || 0) === 0) offPageRecs.push({priority:'high',category:'Backlinks',action:'No backlinks detected. Build quality backlinks through guest posting, local directories, and government/health resource pages that link to vital records information.',icon:'🟠'});
+            else if ((ah.referringDomains || 0) < 5) offPageRecs.push({priority:'medium',category:'Referring Domains',action:'Only ' + (ah.referringDomains||0) + ' referring domain(s). Aim for 10+ unique domains linking to this page for stronger authority signals.',icon:'🟡'});
+            if ((ah.organicTraffic || 0) < 50) offPageRecs.push({priority:'medium',category:'Organic Traffic',action:'Low organic traffic (' + (ah.organicTraffic||0) + ' visits/mo). Consider adding the page to your internal linking structure, sharing on social media, and targeting long-tail keywords in blog posts that link here.',icon:'🟡'});
+            offPageRecs.push({priority:'low',category:'Content Freshness',action:'Schedule quarterly content reviews to update fees, processing times, and requirements. Google rewards fresh, accurate content with better rankings.',icon:'🔵'});
+            return offPageRecs.map(r => '<div class="rec-card ' + r.priority + '"><div class="rec-header"><span class="rec-category">' + r.icon + ' ' + r.category + '</span><span class="rec-points">Off-page</span></div><div class="rec-action">' + r.action + '</div></div>').join('');
+          })()}
         </div>
-        ` : ''}
 
         <div class="detail-section">
           <h3>Score Breakdown</h3>
@@ -756,21 +785,12 @@
         <div class="detail-section">
           <h3>Ahrefs Data</h3>
           <div class="detail-grid">
+            <div class="detail-metric"><div class="label">Domain Rating</div><div class="value">${ah.domainRating||'—'}</div></div>
             <div class="detail-metric"><div class="label">Organic Traffic</div><div class="value">${ah.organicTraffic||0}</div></div>
             <div class="detail-metric"><div class="label">Backlinks</div><div class="value">${ah.backlinks||0}</div></div>
             <div class="detail-metric"><div class="label">Ref Domains</div><div class="value">${ah.referringDomains||0}</div></div>
-            <div class="detail-metric"><div class="label">Keywords</div><div class="value">${(ah.organicKeywords||[]).length}</div></div>
-          </div>
-        </div>` : ''}
-
-        ${sm.available ? `
-        <div class="detail-section">
-          <h3>SEMrush Data</h3>
-          <div class="detail-grid">
-            <div class="detail-metric"><div class="label">Keywords</div><div class="value">${sm.keywordCount||0}</div></div>
-            <div class="detail-metric"><div class="label">Total Traffic</div><div class="value">${Math.round(sm.totalTraffic||0)}</div></div>
-            <div class="detail-metric"><div class="label">Top 10 KWs</div><div class="value">${sm.topPositions||0}</div></div>
-            <div class="detail-metric"><div class="label">Avg Position</div><div class="value">${sm.avgPosition||'—'}</div></div>
+            <div class="detail-metric"><div class="label">Keywords</div><div class="value">${ah.keywordCount||(ah.organicKeywords||[]).length}</div></div>
+            <div class="detail-metric"><div class="label">Total Traffic</div><div class="value">${Math.round(ah.totalTraffic||0)}</div></div>
           </div>
         </div>` : ''}
 
