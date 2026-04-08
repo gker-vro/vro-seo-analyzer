@@ -4,13 +4,14 @@ const cors = require('cors');
 const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── Config ────────────────────────────────────────────────────────
+// ─── Config ────────────────────────────────────────────────────
 const PAYLOAD_BASE = process.env.PAYLOAD_BASE_URL || 'https://www.vitalrecordsonline.com';
 const PAYLOAD_API  = process.env.PAYLOAD_API_PATH  || '/api-cms';
 const PAYLOAD_URL  = `${PAYLOAD_BASE}${PAYLOAD_API}`;
@@ -21,10 +22,58 @@ const PORT         = process.env.PORT || 3847;
 let payloadToken = null;
 let tokenExpiry  = 0;
 
+// ─── Session Authentication ────────────────────────────────────
+const SESSION_TIMEOUT = 24 * 60 * 60 * 1000; // 24 hours
+
+const CREDENTIALS = {
+  'guillaume': 'Vr0-S3o@2026!',
+  'marketing': 'Mkt-An4lyz#24',
+  'developer': 'D3v-Vr0$eoTool',
+  'viewer': 'V1ew-0nly!Seo'
+};
+
+const sessions = {}; // { token: { username, createdAt } }
+
+function generateToken() {
+  return crypto.randomUUID();
+}
+
+function createSession(username) {
+  const token = generateToken();
+  sessions[token] = { username, createdAt: Date.now() };
+  return token;
+}
+
+function validateSession(token) {
+  if (!token || !sessions[token]) return null;
+  const session = sessions[token];
+  if (Date.now() - session.createdAt > SESSION_TIMEOUT) {
+    delete sessions[token];
+    return null;
+  }
+  return session;
+}
+
+// Auth middleware for /api/* routes (except /api/login)
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
+  }
+  const token = authHeader.slice(7);
+  const session = validateSession(token);
+  if (!session) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid or expired session' });
+  }
+  req.session = session;
+  next();
+}
+
 // ─── Persistent Storage ────────────────────────────────────────────
 const DATA_DIR  = path.join(__dirname, 'data');
 const RESULTS_FILE = path.join(DATA_DIR, 'results.json');
 const HISTORY_DIR  = path.join(DATA_DIR, 'history');
+const SERP_HISTORY_FILE = path.join(DATA_DIR, 'serp-history.json');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(HISTORY_DIR)) fs.mkdirSync(HISTORY_DIR, { recursive: true });
@@ -51,7 +100,79 @@ function snapshotHistory() {
   }
 }
 
-// ─── States & Certs ────────────────────────────────────────────────
+// SERP history tracking
+function loadSerpHistory() {
+  try { return JSON.parse(fs.readFileSync(SERP_HISTORY_FILE, 'utf8')); } catch(e) { return {}; }
+}
+
+function saveSerpHistory(data) {
+  fs.writeFileSync(SERP_HISTORY_FILE, JSON.stringify(data, null, 2));
+}
+
+function recordSerpPosition(url, keywords) {
+  const history = loadSerpHistory();
+  const today = new Date().toISOString().split('T')[0];
+
+  if (!history[url]) history[url] = {};
+  if (!history[url][today]) history[url][today] = [];
+
+  history[url][today] = keywords.map(k => ({
+    keyword: k.keyword,
+    position: k.position,
+    volume: k.volume,
+    traffic: k.traffic
+  }));
+
+  saveSerpHistory(history);
+}
+
+function getSerpMovement(url, keywords) {
+  const history = loadSerpHistory();
+  if (!history[url]) return { dailyChange: 0, weeklyChange: 0, keywords };
+
+  const today = new Date().toISOString().split('T')[0];
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+
+  const todayData = history[url][today] || [];
+  const yesterdayData = history[url][yesterday] || [];
+  const weekAgoData = history[url][weekAgo] || [];
+
+  // Calculate daily change
+  let dailyChange = 0;
+  for (const kw of keywords) {
+    const prev = yesterdayData.find(d => d.keyword === kw.keyword);
+    if (prev) {
+      dailyChange += (prev.position - kw.position); // positive = improved
+    }
+  }
+
+  // Calculate weekly change
+  let weeklyChange = 0;
+  for (const kw of keywords) {
+    const prev = weekAgoData.find(d => d.keyword === kw.keyword);
+    if (prev) {
+      weeklyChange += (prev.position - kw.position);
+    }
+  }
+
+  // Enrich keywords with movement
+  const enrichedKeywords = keywords.map(kw => {
+    const yesterday = yesterdayData.find(d => d.keyword === kw.keyword);
+    let dailyMovement = 0;
+    if (yesterday) dailyMovement = yesterday.position - kw.position; // positive = improved
+
+    const lastWeek = weekAgoData.find(d => d.keyword === kw.keyword);
+    let weeklyMovement = 0;
+    if (lastWeek) weeklyMovement = lastWeek.position - kw.position;
+
+    return { ...kw, dailyMovement, weeklyMovement };
+  });
+
+  return { dailyChange, weeklyChange, keywords: enrichedKeywords };
+}
+
+// ─── States & Certs ────────────────────────────────────────────
 const STATES = [
   'alabama','alaska','arizona','arkansas','california','colorado','connecticut',
   'delaware','florida','georgia','hawaii','idaho','illinois','indiana','iowa',
@@ -64,7 +185,7 @@ const STATES = [
 ];
 const CERTS = ['birth-certificate','death-certificate','marriage-certificate','divorce-certificate'];
 
-// ─── Payload Auth ──────────────────────────────────────────────────
+// ─── Payload Auth ──────────────────────────────────────────────
 async function getPayloadToken() {
   if (payloadToken && Date.now() < tokenExpiry) return payloadToken;
   try {
@@ -96,7 +217,7 @@ async function payloadFetch(endpoint, opts = {}) {
   return res.json();
 }
 
-// ─── On-Page SEO Scoring Engine ────────────────────────────────────
+// ─── On-Page SEO Scoring Engine ────────────────────────────────
 function scoreOnPageSEO(pageData, blockData) {
   const scores = {};
   const issues = [];
@@ -349,7 +470,7 @@ function scoreOnPageSEO(pageData, blockData) {
   };
 }
 
-// ─── Block Traversal Helpers ───────────────────────────────────────
+// ─── Block Traversal Helpers ───────────────────────────────────
 function traverseBlocks(block, visitor, depth = 0) {
   if (!block || typeof block !== 'object') return;
   visitor(block, depth);
@@ -466,7 +587,7 @@ function extractImages(blocks) {
   return images;
 }
 
-// ─── Ahrefs API ────────────────────────────────────────────────────
+// ─── Ahrefs API ────────────────────────────────────────────────
 async function fetchAhrefsData(url) {
   if (!AHREFS_TOKEN) return { available: false, error: 'No Ahrefs API token configured' };
   try {
@@ -504,7 +625,7 @@ async function fetchAhrefsData(url) {
   }
 }
 
-// ─── SEMrush API ───────────────────────────────────────────────────
+// ─── SEMrush API ───────────────────────────────────────────────
 async function fetchSemrushData(url) {
   if (!SEMRUSH_KEY) return { available: false, error: 'No SEMrush API key configured' };
   try {
@@ -546,7 +667,7 @@ async function fetchSemrushData(url) {
   }
 }
 
-// ─── Combined Score ────────────────────────────────────────────────
+// ─── Combined Score ────────────────────────────────────────────
 function computeFinalRating(onPageScore, ahrefsData, semrushData) {
   let totalScore = onPageScore.total; // out of 100
   let maxPossible = 100;
@@ -584,7 +705,26 @@ function computeFinalRating(onPageScore, ahrefsData, semrushData) {
   return { totalScore, maxPossible, normalizedScore, grade, boosts };
 }
 
-// ─── API Routes ────────────────────────────────────────────────────
+// ─── API Routes ────────────────────────────────────────────────
+
+// Login endpoint
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
+  if (CREDENTIALS[username] && CREDENTIALS[username] === password) {
+    const token = createSession(username);
+    return res.json({ token, username });
+  }
+  res.status(401).json({ error: 'Invalid credentials' });
+});
+
+// Apply auth middleware to all /api/* routes except /api/login
+app.use('/api/', (req, res, next) => {
+  if (req.path === '/login') return next();
+  authMiddleware(req, res, next);
+});
 
 // List all state/cert combos
 app.get('/api/pages', (req, res) => {
@@ -636,8 +776,24 @@ app.get('/api/analyze/:state/:cert', async (req, res) => {
     // 4. Ahrefs data
     const ahrefs = await fetchAhrefsData(liveUrl);
 
-    // 5. SEMrush data
+    // 5. SEMrush data with keyword position tracking
     const semrush = await fetchSemrushData(liveUrl);
+
+    // Record SERP positions and calculate movement
+    if (semrush.available && semrush.keywords.length > 0) {
+      recordSerpPosition(liveUrl, semrush.keywords);
+      const serpMovement = getSerpMovement(liveUrl, semrush.keywords);
+      semrush.serpData = {
+        keywords: serpMovement.keywords.slice(0, 10), // top 10 keywords with movement
+        dailyChange: serpMovement.dailyChange,
+        weeklyChange: serpMovement.weeklyChange
+      };
+      // Keyword position overview
+      semrush.keywordsTop1 = serpMovement.keywords.filter(k => k.position === 1).length;
+      semrush.keywordsTop3 = serpMovement.keywords.filter(k => k.position <= 3).length;
+      semrush.keywordsTop10 = serpMovement.keywords.filter(k => k.position <= 10).length;
+      semrush.keywordsTop100 = serpMovement.keywords.filter(k => k.position <= 100).length;
+    }
 
     // 6. Combined rating
     const rating = computeFinalRating(onPage, ahrefs, semrush);
@@ -698,9 +854,20 @@ app.post('/api/analyze-batch', async (req, res) => {
       const onPage = scoreOnPageSEO(page, blockData);
       const ahrefs = await fetchAhrefsData(liveUrl);
       const semrush = await fetchSemrushData(liveUrl);
+
+      // Record SERP positions
+      if (semrush.available && semrush.keywords.length > 0) {
+        recordSerpPosition(liveUrl, semrush.keywords);
+        const serpMovement = getSerpMovement(liveUrl, semrush.keywords);
+        semrush.keywordsTop1 = serpMovement.keywords.filter(k => k.position === 1).length;
+        semrush.keywordsTop3 = serpMovement.keywords.filter(k => k.position <= 3).length;
+        semrush.keywordsTop10 = serpMovement.keywords.filter(k => k.position <= 10).length;
+        semrush.keywordsTop100 = serpMovement.keywords.filter(k => k.position <= 100).length;
+      }
+
       const rating = computeFinalRating(onPage, ahrefs, semrush);
 
-      res.write(`data: ${JSON.stringify({ i, state, cert, url: liveUrl, onPage, ahrefs: { available: ahrefs.available }, semrush: { available: semrush.available }, rating, analyzedAt: new Date().toISOString() })}\n\n`);
+      res.write(`data: ${JSON.stringify({ i, state, cert, url: liveUrl, onPage, ahrefs: { available: ahrefs.available }, semrush: { available: semrush.available, keywordsTop1: semrush.keywordsTop1, keywordsTop3: semrush.keywordsTop3, keywordsTop10: semrush.keywordsTop10 }, rating, analyzedAt: new Date().toISOString() })}\n\n`);
     } catch (e) {
       res.write(`data: ${JSON.stringify({ i, state, cert, error: e.message })}\n\n`);
     }
@@ -752,7 +919,7 @@ app.post('/api/export-csv', (req, res) => {
   const { results } = req.body;
   if (!results?.length) return res.status(400).json({ error: 'No results' });
 
-  const header = 'State,Certificate,URL,On-Page Score,Grade,Word Count,FAQ Count,H2 Count,Issues,Ahrefs Traffic,SEMrush Keywords,Final Score,Final Grade,Analyzed At\n';
+  const header = 'State,Certificate,URL,On-Page Score,Grade,Word Count,FAQ Count,H2 Count,Issues,Ahrefs Traffic,SEMrush Keywords,Keywords #1,Keywords #1-3,Keywords #1-10,Final Score,Final Grade,Analyzed At\n';
   const rows = results.map(r => {
     const op = r.onPage || {};
     const ah = r.ahrefs || {};
@@ -763,6 +930,7 @@ app.post('/api/export-csv', (req, res) => {
       op.total, op.grade, op.meta?.wordCount, op.meta?.faqCount, op.meta?.h2s?.length,
       (op.issues || []).length,
       ah.organicTraffic || '', sm.keywordCount || '',
+      sm.keywordsTop1 || 0, sm.keywordsTop3 || 0, sm.keywordsTop10 || 0,
       rt.normalizedScore, rt.grade,
       r.analyzedAt
     ].join(',');
@@ -773,7 +941,7 @@ app.post('/api/export-csv', (req, res) => {
   res.send(header + rows);
 });
 
-// ─── Start ─────────────────────────────────────────────────────────
+// ─── Start ─────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`\n  🔍 VRO SEO Analyzer running at http://localhost:${PORT}\n`);
   console.log(`  Payload CMS: ${PAYLOAD_BASE}`);

@@ -89,9 +89,9 @@
     .rec-points { font-size: 11px; background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 10px; color: var(--text-dim); }
     .rec-action { font-size: 13px; line-height: 1.5; color: var(--text); }
     .rec-current { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
-    .rec-summary { background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(6,182,212,0.1)); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-    .rec-summary-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
-    .rec-summary-sub { font-size: 12px; color: var(--text-dim); }
+    .rec-summary { background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(6,182,212,0.15)); border: 2px solid var(--accent); border-radius: 10px; padding: 18px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(99,102,241,0.1); }
+    .rec-summary-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; color: var(--accent-light); }
+    .rec-summary-sub { font-size: 13px; color: var(--text); }
 
     /* Progress bar */
     .progress-wrap { margin-bottom: 24px; display: none; }
@@ -177,25 +177,101 @@
       filter: { state: 'all', cert: 'all', grade: 'all', search: '' },
       sort: { col: 'state', asc: true },
       selectedPage: null,
-      apiStatus: { payload: false, ahrefs: false, semrush: false }
+      apiStatus: { payload: false, ahrefs: false, semrush: false },
+      authenticated: false,
+      currentUser: null
     };
+
+    // ─── Session Management ──────────────────────────────────
+    function getAuthToken() {
+      return sessionStorage.getItem('vro_auth_token');
+    }
+
+    function setAuthToken(token) {
+      sessionStorage.setItem('vro_auth_token', token);
+    }
+
+    function clearAuthToken() {
+      sessionStorage.removeItem('vro_auth_token');
+    }
+
+    function getAuthHeader() {
+      const token = getAuthToken();
+      return token ? { 'Authorization': `Bearer ${token}` } : {};
+    }
+
+    async function login(username, password) {
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.token) {
+          setAuthToken(data.token);
+          state.authenticated = true;
+          state.currentUser = data.username;
+          init();
+          return true;
+        } else {
+          alert(data.error || 'Login failed');
+          return false;
+        }
+      } catch(e) {
+        alert('Login error: ' + e.message);
+        return false;
+      }
+    }
+
+    function logout() {
+      clearAuthToken();
+      state.authenticated = false;
+      state.currentUser = null;
+      state.pages = [];
+      state.results = {};
+      state.selectedPage = null;
+      render();
+    }
 
     // ─── Init ───────────────────────────────────────────────
     async function init() {
-      const [pagesRes, statusRes, savedRes] = await Promise.all([
-        fetch('/api/pages').then(r => r.json()),
-        fetch('/api/status').then(r => r.json()),
-        fetch('/api/results').then(r => r.json()).catch(() => ({}))
-      ]);
-      state.pages = pagesRes.pages;
-      state.apiStatus = statusRes;
-
-      // Load saved results from server (persisted on disk)
-      if (savedRes && Object.keys(savedRes).length > 0) {
-        state.results = savedRes;
+      const token = getAuthToken();
+      if (!token) {
+        state.authenticated = false;
+        render();
+        return;
       }
 
-      render();
+      state.authenticated = true;
+      const headers = getAuthHeader();
+
+      try {
+        const [pagesRes, statusRes, savedRes] = await Promise.all([
+          fetch('/api/pages', { headers }).then(r => r.json()),
+          fetch('/api/status', { headers }).then(r => r.json()),
+          fetch('/api/results', { headers }).then(r => r.json()).catch(() => ({}))
+        ]);
+        state.pages = pagesRes.pages;
+        state.apiStatus = statusRes;
+
+        // Load saved results from server (persisted on disk)
+        if (savedRes && Object.keys(savedRes).length > 0) {
+          state.results = savedRes;
+        }
+
+        render();
+      } catch(e) {
+        console.error('Init error:', e);
+        if (e.message.includes('401')) {
+          logout();
+        }
+      }
+    }
+
+    // Check for existing session on page load
+    if (getAuthToken()) {
+      state.authenticated = true;
     }
 
     function saveResults() {
@@ -206,7 +282,11 @@
     async function analyzeSingle(s, cert) {
       const key = `${s}/${cert}`;
       try {
-        const res = await fetch(`/api/analyze/${s}/${cert}`);
+        const res = await fetch(`/api/analyze/${s}/${cert}`, { headers: getAuthHeader() });
+        if (res.status === 401) {
+          logout();
+          return { error: 'Session expired' };
+        }
         const data = await res.json();
         if (!data.error) {
           state.results[key] = data;
@@ -219,7 +299,7 @@
     }
 
     async function saveSnapshot() {
-      const res = await fetch('/api/snapshot', { method: 'POST' });
+      const res = await fetch('/api/snapshot', { method: 'POST', headers: getAuthHeader() });
       const data = await res.json();
       alert(`Snapshot saved! (${data.snapshots} total snapshots in history)`);
     }
@@ -353,6 +433,40 @@
 
     // ─── Render ─────────────────────────────────────────────
     function render() {
+      // Show login screen if not authenticated
+      if (!state.authenticated) {
+        document.getElementById('app').innerHTML = `
+          <div class="app" style="align-items: center; justify-content: center;">
+            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 40px; width: 100%; max-width: 400px; box-shadow: 0 8px 24px rgba(0,0,0,0.4)">
+              <div style="text-align: center; margin-bottom: 32px">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 16px"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <h1 style="font-size: 24px; margin-bottom: 8px">VRO SEO Analyzer</h1>
+                <p style="color: var(--text-dim); font-size: 14px">Sign in to access analysis tools</p>
+              </div>
+              <form onsubmit="event.preventDefault(); handleLogin()">
+                <div style="margin-bottom: 16px">
+                  <label style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 8px; font-weight: 600">Username</label>
+                  <input type="text" id="login-username" placeholder="Enter username" style="width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 14px" required>
+                </div>
+                <div style="margin-bottom: 24px">
+                  <label style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 8px; font-weight: 600">Password</label>
+                  <input type="password" id="login-password" placeholder="Enter password" style="width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 14px" required>
+                </div>
+                <button type="submit" style="width: 100%; padding: 10px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; background: var(--accent); color: white; transition: all 0.15s">Sign In</button>
+              </form>
+              <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-dim); line-height: 1.6">
+                <p style="margin: 0 0 8px 0"><strong style="color: var(--text)">Demo Accounts:</strong></p>
+                <p style="margin: 0 0 4px 0">guillaume / Vr0-S3o@2026!</p>
+                <p style="margin: 0 0 4px 0">marketing / Mkt-An4lyz#24</p>
+                <p style="margin: 0 0 4px 0">developer / D3v-Vr0\$eoTool</p>
+                <p style="margin: 0">viewer / V1ew-0nly!Seo</p>
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
       const stats = getStats();
       const filtered = getFilteredPages();
       const uniqueStates = [...new Set(state.pages.map(p => p.state))].sort();
@@ -369,8 +483,12 @@
               <div class="status-dot"><div class="dot ${state.apiStatus.ahrefs ? 'dot-ok' : 'dot-off'}"></div>Ahrefs</div>
               <div class="status-dot"><div class="dot ${state.apiStatus.semrush ? 'dot-ok' : 'dot-off'}"></div>SEMrush</div>
             </div>
+            <div style="display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-dim)">
+              <span>Signed in as <strong style="color: var(--text)">${state.currentUser}</strong></span>
+            </div>
             <button class="btn btn-secondary" onclick="saveSnapshot()">Save Snapshot</button>
             <button class="btn btn-secondary" onclick="exportCSV()">Export CSV</button>
+            <button class="btn btn-secondary" onclick="logout()" style="color: var(--red); border-color: var(--red)">Logout</button>
             ${state.analyzing
               ? `<button class="btn btn-primary" disabled style="opacity:0.7">
                   ${batchPaused ? '⏸ Paused' : '⟳ Running'} (${state.progress.current}/${state.progress.total})
@@ -539,6 +657,60 @@
           </div>
         </div>
 
+        ${sm.serpData && sm.serpData.keywords && sm.serpData.keywords.length > 0 ? `
+        <div class="detail-section">
+          <h3>SERP Position Movement</h3>
+          <div style="margin-bottom: 12px">
+            <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px">Top 10 Keywords</div>
+            ${sm.serpData.keywords.slice(0, 10).map(k => {
+              const dailyArrow = k.dailyMovement > 0 ? '▲' : k.dailyMovement < 0 ? '▼' : '─';
+              const weeklyArrow = k.weeklyMovement > 0 ? '▲' : k.weeklyMovement < 0 ? '▼' : '─';
+              const dailyColor = k.dailyMovement > 0 ? 'var(--green)' : k.dailyMovement < 0 ? 'var(--red)' : 'var(--text-dim)';
+              const weeklyColor = k.weeklyMovement > 0 ? 'var(--green)' : k.weeklyMovement < 0 ? 'var(--red)' : 'var(--text-dim)';
+              return `
+                <div style="background: var(--surface2); border-radius: 6px; padding: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center">
+                  <div style="flex: 1">
+                    <div style="font-size: 13px; color: var(--text); margin-bottom: 2px">${k.keyword}</div>
+                    <div style="font-size: 11px; color: var(--text-dim)">Vol: ${k.volume || 0} • Traffic: ${k.traffic || 0}</div>
+                  </div>
+                  <div style="text-align: right">
+                    <div style="font-size: 14px; font-weight: 700; color: var(--accent-light); margin-bottom: 4px">Pos #${k.position}</div>
+                    <div style="font-size: 11px; display: flex; gap: 8px; justify-content: flex-end">
+                      <span style="color: ${dailyColor}; font-weight: 700">${dailyArrow} ${Math.abs(k.dailyMovement)}</span>
+                      <span style="color: ${weeklyColor}; font-weight: 700">${weeklyArrow} ${Math.abs(k.weeklyMovement)}</span>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        ${sm.keywordsTop1 !== undefined ? `
+        <div class="detail-section">
+          <h3>Keyword Position Overview</h3>
+          <div class="detail-grid" style="grid-template-columns: repeat(4, 1fr)">
+            <div class="detail-metric" style="border: 2px solid var(--green)">
+              <div class="label">Top 1</div>
+              <div class="value" style="color: var(--green)">${sm.keywordsTop1 || 0}</div>
+            </div>
+            <div class="detail-metric" style="border: 2px solid var(--cyan)">
+              <div class="label">Top 3</div>
+              <div class="value" style="color: var(--cyan)">${sm.keywordsTop3 || 0}</div>
+            </div>
+            <div class="detail-metric" style="border: 2px solid var(--yellow)">
+              <div class="label">Top 10</div>
+              <div class="value" style="color: var(--yellow)">${sm.keywordsTop10 || 0}</div>
+            </div>
+            <div class="detail-metric" style="border: 2px solid var(--blue)">
+              <div class="label">Top 100</div>
+              <div class="value" style="color: var(--blue)">${sm.keywordsTop100 || 0}</div>
+            </div>
+          </div>
+        </div>
+        ` : ''}
+
         ${(op.recommendations || []).length > 0 ? `
         <div class="detail-section">
           <h3>How to Reach A Rank</h3>
@@ -631,6 +803,19 @@
           </ul>
         </div>` : ''}
       `;
+    }
+
+    // ─── Login Handler ──────────────────────────────────────
+    async function handleLogin() {
+      const username = document.getElementById('login-username').value;
+      const password = document.getElementById('login-password').value;
+      if (username && password) {
+        const success = await login(username, password);
+        if (!success) {
+          document.getElementById('login-username').value = '';
+          document.getElementById('login-password').value = '';
+        }
+      }
     }
 
     // ─── Interactions ───────────────────────────────────────
