@@ -20,8 +20,12 @@ const SEMRUSH_KEY  = process.env.SEMRUSH_API_KEY   || '';
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY  || '';
 const PORT         = process.env.PORT || 3847;
 
+// ─── Persistent Data Directory ────────────────────────────────
+// Use DATA_PATH env var (Railway Volume mount) or fall back to local ./data
+const DATA_ROOT = process.env.DATA_PATH || path.join(__dirname, 'data');
+
 // ─── Runtime Settings (overridable from UI) ───────────────────
-const SETTINGS_FILE = path.join(__dirname, 'data', 'settings.json');
+const SETTINGS_FILE = path.join(DATA_ROOT, 'settings.json');
 function loadSettings() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch(e) { return {}; }
 }
@@ -85,7 +89,7 @@ function authMiddleware(req, res, next) {
 }
 
 // ─── Persistent Storage ────────────────────────────────────────────
-const DATA_DIR  = path.join(__dirname, 'data');
+const DATA_DIR  = DATA_ROOT;
 const RESULTS_FILE = path.join(DATA_DIR, 'results.json');
 const HISTORY_DIR  = path.join(DATA_DIR, 'history');
 const SERP_HISTORY_FILE = path.join(DATA_DIR, 'serp-history.json');
@@ -1306,5 +1310,6 @@ app.listen(PORT, () => {
   console.log(`  Ahrefs API:   ${AHREFS_TOKEN ? '✓ configured' : '✗ not configured'}`);
   console.log(`  SEMrush API:  ${SEMRUSH_KEY ? '✓ configured' : '✗ not configured'}`);
   console.log(`  DeepSeek API: ${getSetting('deepseek_api_key', DEEPSEEK_KEY) ? '✓ configured' : '✗ not configured'}`);
+  console.log(`  Data storage:  ${DATA_DIR}${process.env.DATA_PATH ? ' (persistent volume)' : ' (ephemeral - add DATA_PATH for persistence)'}`);
   console.log(`  Live scraping: ✓ enabled (H2s, meta, content from live website)\n`);
 });
