@@ -1,3 +1,6 @@
 node_modules/
 .env
 data/history/
+data/settings.json
+data/results.json
+data/*.json

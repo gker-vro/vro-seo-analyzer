@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VRO SEO Analyzer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
     :root {
       --bg: #0f1117;
@@ -20,6 +21,7 @@
       --red: #ef4444;
       --blue: #3b82f6;
       --cyan: #06b6d4;
+      --purple: #a855f7;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
@@ -59,6 +61,10 @@
     .btn-sm { padding: 5px 10px; font-size: 12px; }
     .btn-icon { background: none; border: 1px solid var(--border); color: var(--text-dim); width: 34px; height: 34px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
     .btn-icon:hover { background: var(--surface2); color: var(--text); }
+    .btn-purple { background: var(--purple); color: white; }
+    .btn-purple:hover { background: #9333ea; }
+    .btn-green { background: var(--green); color: white; }
+    .btn-green:hover { background: #16a34a; }
 
     /* Stats bar */
     .stats-bar { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 24px; }
@@ -128,7 +134,7 @@
     .score-bar-fill.low { background: var(--red); }
 
     /* Detail panel */
-    .detail-overlay { position: fixed; top: 0; right: 0; bottom: 0; width: 520px; background: var(--surface); border-left: 1px solid var(--border); z-index: 100; transform: translateX(100%); transition: transform 0.25s ease; overflow-y: auto; padding: 24px; }
+    .detail-overlay { position: fixed; top: 0; right: 0; bottom: 0; width: 560px; background: var(--surface); border-left: 1px solid var(--border); z-index: 100; transform: translateX(100%); transition: transform 0.25s ease; overflow-y: auto; padding: 24px; }
     .detail-overlay.open { transform: translateX(0); }
     .detail-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99; display: none; }
     .detail-backdrop.open { display: block; }
@@ -159,6 +165,33 @@
     .tag-marriage { background: rgba(234,179,8,0.1); color: #fde68a; }
     .tag-divorce { background: rgba(249,115,22,0.1); color: #fdba74; }
 
+    /* Source badge */
+    .source-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .source-live { background: rgba(34,197,94,0.15); color: var(--green); }
+    .source-payload { background: rgba(234,179,8,0.15); color: var(--yellow); }
+
+    /* Modal */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; display: flex; align-items: center; justify-content: center; }
+    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px; width: 500px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+    .modal h2 { margin-bottom: 20px; font-size: 20px; }
+    .modal-field { margin-bottom: 16px; }
+    .modal-field label { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 6px; font-weight: 600; }
+    .modal-field input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 14px; font-family: monospace; }
+    .modal-field input:focus { outline: none; border-color: var(--accent); }
+    .modal-field .hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+
+    /* DeepSeek AI card */
+    .ai-card { background: linear-gradient(135deg, rgba(168,85,247,0.1), rgba(99,102,241,0.1)); border: 1px solid rgba(168,85,247,0.3); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .ai-card h4 { color: var(--purple); margin-bottom: 8px; font-size: 14px; }
+    .ai-card .ai-content { font-size: 13px; line-height: 1.6; }
+    .ai-card .ai-list { list-style: none; padding: 0; }
+    .ai-card .ai-list li { padding: 4px 0; font-size: 13px; }
+    .ai-card .ai-list li::before { content: '→ '; color: var(--purple); font-weight: 700; }
+
+    /* MD download progress */
+    .md-progress { background: var(--surface2); border-radius: 8px; padding: 12px; margin-top: 8px; font-size: 12px; color: var(--text-dim); }
+
     /* Responsive */
     @media (max-width: 1200px) { .stats-bar { grid-template-columns: repeat(3, 1fr); } }
     @media (max-width: 900px) { .sidebar { display: none; } .stats-bar { grid-template-columns: repeat(2, 1fr); } }
@@ -171,30 +204,26 @@
     // ─── State ──────────────────────────────────────────────
     const state = {
       pages: [],
-      results: {},        // keyed by "state/cert"
+      results: {},
       analyzing: false,
       progress: { current: 0, total: 0, currentPage: '' },
       filter: { state: 'all', cert: 'all', grade: 'all', search: '' },
       sort: { col: 'state', asc: true },
       selectedPage: null,
-      apiStatus: { payload: false, ahrefs: false, semrush: false },
+      apiStatus: { payload: false, ahrefs: false, semrush: false, deepseek: false },
       authenticated: false,
-      currentUser: null
+      currentUser: null,
+      showSettings: false,
+      showMdProgress: false,
+      mdProgress: { done: 0, total: 0, status: '' },
+      deepseekResult: null,
+      deepseekLoading: false
     };
 
     // ─── Session Management ──────────────────────────────────
-    function getAuthToken() {
-      return sessionStorage.getItem('vro_auth_token');
-    }
-
-    function setAuthToken(token) {
-      sessionStorage.setItem('vro_auth_token', token);
-    }
-
-    function clearAuthToken() {
-      sessionStorage.removeItem('vro_auth_token');
-    }
-
+    function getAuthToken() { return sessionStorage.getItem('vro_auth_token'); }
+    function setAuthToken(token) { sessionStorage.setItem('vro_auth_token', token); }
+    function clearAuthToken() { sessionStorage.removeItem('vro_auth_token'); }
     function getAuthHeader() {
       const token = getAuthToken();
       return token ? { 'Authorization': `Bearer ${token}` } : {};
@@ -237,12 +266,7 @@
     // ─── Init ───────────────────────────────────────────────
     async function init() {
       const token = getAuthToken();
-      if (!token) {
-        state.authenticated = false;
-        render();
-        return;
-      }
-
+      if (!token) { state.authenticated = false; render(); return; }
       state.authenticated = true;
       const headers = getAuthHeader();
 
@@ -254,44 +278,24 @@
         ]);
         state.pages = pagesRes.pages;
         state.apiStatus = statusRes;
-
-        // Load saved results from server (persisted on disk)
-        if (savedRes && Object.keys(savedRes).length > 0) {
-          state.results = savedRes;
-        }
-
+        if (savedRes && Object.keys(savedRes).length > 0) state.results = savedRes;
         render();
       } catch(e) {
         console.error('Init error:', e);
-        if (e.message.includes('401')) {
-          logout();
-        }
+        if (e.message.includes('401')) logout();
       }
     }
 
-    // Check for existing session on page load
-    if (getAuthToken()) {
-      state.authenticated = true;
-    }
-
-    function saveResults() {
-      // Results are now saved server-side automatically on each analysis
-    }
+    if (getAuthToken()) state.authenticated = true;
 
     // ─── Analysis ───────────────────────────────────────────
     async function analyzeSingle(s, cert) {
       const key = `${s}/${cert}`;
       try {
         const res = await fetch(`/api/analyze/${s}/${cert}`, { headers: getAuthHeader() });
-        if (res.status === 401) {
-          logout();
-          return { error: 'Session expired' };
-        }
+        if (res.status === 401) { logout(); return { error: 'Session expired' }; }
         const data = await res.json();
-        if (!data.error) {
-          state.results[key] = data;
-          // Server auto-saves to data/results.json
-        }
+        if (!data.error) state.results[key] = data;
         return data;
       } catch(e) {
         return { error: e.message };
@@ -304,18 +308,15 @@
       alert(`Snapshot saved! (${data.snapshots} total snapshots in history)`);
     }
 
-    // Batch control flags
+    // Batch control
     let batchPaused = false;
     let batchStopped = false;
-
     function pauseBatch() { batchPaused = true; render(); }
     function resumeBatch() { batchPaused = false; render(); }
     function stopBatch() { batchStopped = true; batchPaused = false; }
 
     async function waitWhilePaused() {
-      while (batchPaused && !batchStopped) {
-        await new Promise(r => setTimeout(r, 300));
-      }
+      while (batchPaused && !batchStopped) await new Promise(r => setTimeout(r, 300));
     }
 
     async function runBatch(pages) {
@@ -324,20 +325,16 @@
       state.analyzing = true;
       state.progress = { current: 0, total: pages.length, currentPage: '' };
       render();
-
       for (const page of pages) {
         if (batchStopped) break;
         await waitWhilePaused();
         if (batchStopped) break;
-
         state.progress.currentPage = `${page.stateName} ${page.certName}`;
         state.progress.current++;
         render();
-
         await analyzeSingle(page.state, page.cert);
         await new Promise(r => setTimeout(r, 200));
       }
-
       state.analyzing = false;
       batchPaused = false;
       batchStopped = false;
@@ -345,7 +342,105 @@
     }
 
     async function analyzeAll() { await runBatch(getFilteredPages()); }
-    async function analyzeSelected(pages) { await runBatch(pages); }
+
+    // ─── DeepSeek AI Analysis ───────────────────────────────
+    async function runDeepSeek(s, cert) {
+      state.deepseekLoading = true;
+      state.deepseekResult = null;
+      render();
+      try {
+        const res = await fetch('/api/deepseek-analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify({ state: s, cert })
+        });
+        const data = await res.json();
+        state.deepseekResult = data;
+      } catch(e) {
+        state.deepseekResult = { available: false, error: e.message };
+      }
+      state.deepseekLoading = false;
+      render();
+    }
+
+    // ─── MD Download ────────────────────────────────────────
+    async function downloadSingleMD(s, cert) {
+      window.open(`/api/markdown/${s}/${cert}?token=${getAuthToken()}`, '_blank');
+    }
+
+    async function downloadAllMD() {
+      state.showMdProgress = true;
+      state.mdProgress = { done: 0, total: 200, status: 'Starting...' };
+      render();
+
+      const zip = new JSZip();
+      const filtered = getFilteredPages();
+      state.mdProgress.total = filtered.length;
+
+      // Process in batches via SSE
+      const evtSource = new EventSource(`/api/markdown-all?states=${[...new Set(filtered.map(p=>p.state))].join(',')}&certs=${[...new Set(filtered.map(p=>p.cert))].join(',')}`);
+
+      evtSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        if (data.complete) {
+          evtSource.close();
+          // Generate and download zip
+          zip.generateAsync({ type: 'blob' }).then(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `vro-pages-md-${new Date().toISOString().slice(0,10)}.zip`;
+            a.click();
+            URL.revokeObjectURL(url);
+            state.showMdProgress = false;
+            render();
+          });
+          return;
+        }
+        if (data.content) {
+          zip.file(data.filename, data.content);
+        }
+        state.mdProgress.done = data.done;
+        state.mdProgress.status = `${data.state}/${data.cert}` + (data.error ? ` (error: ${data.error})` : '');
+        render();
+      };
+
+      evtSource.onerror = function() {
+        evtSource.close();
+        state.showMdProgress = false;
+        alert('Error downloading MD files. Check console.');
+        render();
+      };
+    }
+
+    // ─── Settings ───────────────────────────────────────────
+    async function openSettings() {
+      state.showSettings = true;
+      render();
+      // Load current settings
+      try {
+        const res = await fetch('/api/settings', { headers: getAuthHeader() });
+        const data = await res.json();
+        const el = document.getElementById('settings-deepseek');
+        if (el && data.deepseek_api_key) el.placeholder = `Configured (${data.deepseek_api_key})`;
+      } catch(e) {}
+    }
+
+    async function saveSettings() {
+      const key = document.getElementById('settings-deepseek')?.value;
+      if (key) {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify({ deepseek_api_key: key })
+        });
+      }
+      state.showSettings = false;
+      // Refresh status
+      const statusRes = await fetch('/api/status', { headers: getAuthHeader() }).then(r => r.json());
+      state.apiStatus = statusRes;
+      render();
+    }
 
     // ─── Filtering & Sorting ────────────────────────────────
     function getFilteredPages() {
@@ -363,8 +458,6 @@
           return r.rating?.grade === state.filter.grade || r.onPage?.grade === state.filter.grade;
         });
       }
-
-      // Sort
       filtered.sort((a, b) => {
         const rA = state.results[`${a.state}/${a.cert}`];
         const rB = state.results[`${b.state}/${b.cert}`];
@@ -382,7 +475,6 @@
         if (typeof vA === 'string') return state.sort.asc ? vA.localeCompare(vB) : vB.localeCompare(vA);
         return state.sort.asc ? vA - vB : vB - vA;
       });
-
       return filtered;
     }
 
@@ -408,8 +500,7 @@
     function exportCSV() {
       const results = Object.values(state.results);
       if (!results.length) return alert('No results to export. Run analysis first.');
-
-      const header = 'State,Certificate,URL,On-Page Score,Grade,Word Count,FAQ Count,H2 Count,Critical Issues,Warnings,Meta Title Length,Meta Desc Length,Final Score,Final Grade\n';
+      const header = 'State,Certificate,URL,On-Page Score,Grade,Word Count,FAQ Count,H2 Count,Data Source,Critical Issues,Warnings,Meta Title Length,Meta Desc Length,Final Score,Final Grade\n';
       const rows = results.map(r => {
         const op = r.onPage || {};
         const rt = r.rating || {};
@@ -418,12 +509,12 @@
         return [
           r.state, r.cert, r.url,
           op.total, op.grade, op.meta?.wordCount || 0, op.meta?.faqCount || 0, (op.meta?.h2s || []).length,
+          op.meta?.source || 'payload',
           criticals, warnings,
           (op.meta?.metaTitle || '').length, (op.meta?.metaDesc || '').length,
           rt.normalizedScore || op.total, rt.grade || op.grade
         ].join(',');
       }).join('\n');
-
       const blob = new Blob([header + rows], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -433,7 +524,7 @@
 
     // ─── Render ─────────────────────────────────────────────
     function render() {
-      // Show login screen if not authenticated
+      // Login screen
       if (!state.authenticated) {
         document.getElementById('app').innerHTML = `
           <div class="app" style="align-items: center; justify-content: center;">
@@ -452,11 +543,8 @@
                   <label style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 8px; font-weight: 600">Password</label>
                   <input type="password" id="login-password" placeholder="Enter password" style="width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 14px" required>
                 </div>
-                <button type="submit" style="width: 100%; padding: 10px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; background: var(--accent); color: white; transition: all 0.15s">Sign In</button>
+                <button type="submit" style="width: 100%; padding: 10px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; background: var(--accent); color: white;">Sign In</button>
               </form>
-              <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-dim); line-height: 1.6">
-                <p style="margin: 0"><strong style="color: var(--text)">VRO SEO Analyzer</strong> — Contact admin for credentials</p>
-              </div>
             </div>
           </div>
         `;
@@ -472,19 +560,21 @@
           <h1>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <span>VRO</span> SEO Analyzer
+            <span class="source-badge source-live" style="margin-left:8px">LIVE DATA</span>
           </h1>
           <div class="header-actions">
             <div class="status-dots">
               <div class="status-dot"><div class="dot ${state.apiStatus.payload ? 'dot-ok' : 'dot-off'}"></div>Payload</div>
               <div class="status-dot"><div class="dot ${state.apiStatus.ahrefs ? 'dot-ok' : 'dot-off'}"></div>Ahrefs</div>
               <div class="status-dot"><div class="dot ${state.apiStatus.semrush ? 'dot-ok' : 'dot-off'}"></div>SEMrush</div>
+              <div class="status-dot"><div class="dot ${state.apiStatus.deepseek ? 'dot-ok' : 'dot-off'}"></div>DeepSeek</div>
             </div>
-            <div style="display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-dim)">
-              <span>Signed in as <strong style="color: var(--text)">${state.currentUser}</strong></span>
-            </div>
-            <button class="btn btn-secondary" onclick="saveSnapshot()">Save Snapshot</button>
-            <button class="btn btn-secondary" onclick="exportCSV()">Export CSV</button>
-            <button class="btn btn-secondary" onclick="logout()" style="color: var(--red); border-color: var(--red)">Logout</button>
+            <span style="font-size:12px;color:var(--text-dim)"><strong style="color:var(--text)">${state.currentUser}</strong></span>
+            <button class="btn btn-secondary btn-sm" onclick="openSettings()" title="API Settings">⚙️</button>
+            <button class="btn btn-secondary btn-sm" onclick="saveSnapshot()">Snapshot</button>
+            <button class="btn btn-secondary btn-sm" onclick="exportCSV()">CSV</button>
+            <button class="btn btn-green btn-sm" onclick="downloadAllMD()">📥 All MD</button>
+            <button class="btn btn-secondary btn-sm" onclick="logout()" style="color:var(--red);border-color:var(--red)">Logout</button>
             ${state.analyzing
               ? `<button class="btn btn-primary" disabled style="opacity:0.7">
                   ${batchPaused ? '⏸ Paused' : '⟳ Running'} (${state.progress.current}/${state.progress.total})
@@ -532,7 +622,7 @@
               <label>Quick Actions</label>
               <button class="btn btn-secondary" style="width:100%;margin-bottom:8px" onclick="analyzeUnscored()">Analyze Unscored Only</button>
               <button class="btn btn-secondary" style="width:100%;margin-bottom:8px" onclick="analyzeFiltered()">Analyze Filtered (${filtered.length})</button>
-              <button class="btn btn-secondary" style="width:100%;color:var(--red)" onclick="if(confirm('Clear all results?')){state.results={};saveResults();render();}">Clear All Results</button>
+              <button class="btn btn-secondary" style="width:100%;color:var(--red)" onclick="if(confirm('Clear all results?')){state.results={};render();}">Clear All Results</button>
             </div>
             <div class="filter-group">
               <label>Grade Distribution</label>
@@ -553,8 +643,19 @@
               <div class="stat-card"><div class="stat-label">Avg Score</div><div class="stat-value ${stats.avgScore >= 70 ? 'grade-A' : stats.avgScore >= 55 ? 'grade-C' : 'grade-F'}">${stats.avgScore}</div></div>
               <div class="stat-card"><div class="stat-label">Critical Issues</div><div class="stat-value" style="color:var(--red)">${stats.issues}</div></div>
               <div class="stat-card"><div class="stat-label">Showing</div><div class="stat-value">${filtered.length}</div><div class="stat-sub">of ${stats.total}</div></div>
-              <div class="stat-card"><div class="stat-label">Data Sources</div><div class="stat-value" style="font-size:16px">${[state.apiStatus.payload?'CMS':'',state.apiStatus.ahrefs?'Ahrefs':'',state.apiStatus.semrush?'SEMrush':''].filter(Boolean).join(', ')||'CMS only'}</div></div>
+              <div class="stat-card"><div class="stat-label">Data Sources</div><div class="stat-value" style="font-size:14px">${['Live',state.apiStatus.payload?'CMS':'',state.apiStatus.ahrefs?'Ahrefs':'',state.apiStatus.semrush?'SEMrush':'',state.apiStatus.deepseek?'AI':''].filter(Boolean).join(', ')}</div></div>
             </div>
+
+            ${state.showMdProgress ? `
+            <div class="md-progress">
+              <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+                <span>📥 Generating MD files...</span>
+                <span>${state.mdProgress.done}/${state.mdProgress.total}</span>
+              </div>
+              <div class="progress-bar-outer"><div class="progress-bar-inner" style="width:${state.mdProgress.total>0?Math.round(state.mdProgress.done/state.mdProgress.total*100):0}%"></div></div>
+              <div style="margin-top:4px;font-size:11px">${state.mdProgress.status}</div>
+            </div>
+            ` : ''}
 
             <div class="progress-wrap ${state.analyzing?'active':''}">
               <div class="progress-bar-outer"><div class="progress-bar-inner" style="width:${state.progress.total>0?Math.round(state.progress.current/state.progress.total*100):0}%"></div></div>
@@ -574,7 +675,7 @@
             ${filtered.length === 0 && stats.analyzed === 0 ? `
               <div class="empty-state">
                 <h2>Ready to Analyze</h2>
-                <p>Click "Analyze All" to scan all ${stats.total} state/certificate pages. Each page will be scored on meta tags, headings, content quality, FAQs, and more.</p>
+                <p>Click "Analyze All" to scan all ${stats.total} state/certificate pages using <strong>live website data</strong>. H2s, meta tags, and content are scraped from the live site.</p>
                 <button class="btn btn-primary" onclick="analyzeAll()" style="font-size:15px;padding:12px 24px">Start Full Analysis</button>
               </div>
             ` : `
@@ -589,7 +690,7 @@
                       <th onclick="toggleSort('words')" class="${state.sort.col==='words'?'sorted'+(state.sort.asc?' asc':''):''}">Words</th>
                       <th onclick="toggleSort('faqs')" class="${state.sort.col==='faqs'?'sorted'+(state.sort.asc?' asc':''):''}">FAQs</th>
                       <th onclick="toggleSort('issues')" class="${state.sort.col==='issues'?'sorted'+(state.sort.asc?' asc':''):''}">Issues</th>
-                      <th>Top Fix</th>
+                      <th>Source</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -598,6 +699,7 @@
                       const key = `${p.state}/${p.cert}`;
                       const r = state.results[key];
                       const certTag = p.cert.split('-')[0];
+                      const src = r?.onPage?.meta?.source;
                       return `<tr onclick="showDetail('${p.state}','${p.cert}')" style="cursor:pointer">
                         <td><strong>${p.stateName}</strong></td>
                         <td><span class="tag tag-${certTag}">${certTag.toUpperCase()}</span></td>
@@ -606,8 +708,10 @@
                         <td class="center">${r ? r.onPage?.meta?.wordCount || '—' : '—'}</td>
                         <td class="center">${r ? r.onPage?.meta?.faqCount || '0' : '—'}</td>
                         <td class="center">${r ? `<span style="color:${r.onPage?.issues?.filter(i=>i.severity==='critical').length>0?'var(--red)':'var(--text-dim)'}">${r.onPage?.issues?.length || 0}</span>` : '—'}</td>
-                        <td style="max-width:180px;font-size:11px;color:var(--text-dim)">${r?.onPage?.recommendations?.[0] ? `<span style="color:${r.onPage.recommendations[0].priority==='critical'?'var(--red)':r.onPage.recommendations[0].priority==='high'?'var(--orange)':'var(--yellow)'}">${r.onPage.recommendations[0].category}</span> (+${r.onPage.recommendations[0].points}pts)` : (r ? '<span style="color:var(--green)">A rank</span>' : '—')}</td>
-                        <td><button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();analyzeSingle('${p.state}','${p.cert}').then(()=>render())">Scan</button></td>
+                        <td>${src ? `<span class="source-badge source-${src}">${src}</span>` : '—'}</td>
+                        <td>
+                          <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();analyzeSingle('${p.state}','${p.cert}').then(()=>render())">Scan</button>
+                        </td>
                       </tr>`;
                     }).join('')}
                   </tbody>
@@ -622,6 +726,39 @@
         <div class="detail-overlay ${state.selectedPage?'open':''}">
           ${state.selectedPage ? renderDetail() : ''}
         </div>
+
+        <!-- Settings modal -->
+        ${state.showSettings ? `
+        <div class="modal-backdrop" onclick="state.showSettings=false;render()">
+          <div class="modal" onclick="event.stopPropagation()">
+            <h2>⚙️ API Settings</h2>
+            <p style="color:var(--text-dim);font-size:13px;margin-bottom:20px">Configure API keys here or set them as environment variables in Railway.</p>
+
+            <div class="modal-field">
+              <label>DeepSeek API Key</label>
+              <input type="password" id="settings-deepseek" placeholder="sk-..." />
+              <div class="hint">AI-powered SEO recommendations. Get your key at <a href="https://platform.deepseek.com/api_keys" target="_blank" style="color:var(--accent-light)">platform.deepseek.com</a></div>
+            </div>
+
+            <div class="modal-field">
+              <label>Ahrefs API Token <span style="color:var(--text-dim)">(env var only)</span></label>
+              <input type="text" disabled value="${state.apiStatus.ahrefs ? '✓ Configured via AHREFS_API_TOKEN' : '✗ Not configured'}" style="opacity:0.6" />
+              <div class="hint">Set AHREFS_API_TOKEN in Railway environment variables</div>
+            </div>
+
+            <div class="modal-field">
+              <label>SEMrush API Key <span style="color:var(--text-dim)">(env var only)</span></label>
+              <input type="text" disabled value="${state.apiStatus.semrush ? '✓ Configured via SEMRUSH_API_KEY' : '✗ Not configured'}" style="opacity:0.6" />
+              <div class="hint">Set SEMRUSH_API_KEY in Railway environment variables</div>
+            </div>
+
+            <div class="modal-actions">
+              <button class="btn btn-secondary" onclick="state.showSettings=false;render()">Cancel</button>
+              <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+            </div>
+          </div>
+        </div>
+        ` : ''}
       `;
     }
 
@@ -630,16 +767,23 @@
       if (!r) return '';
       const op = r.onPage || {};
       const ah = r.ahrefs || {};
-      const sm = r.semrush || {};
       const rt = r.rating || {};
+      const src = op.meta?.source || 'payload';
+      const ds = state.deepseekResult;
 
       return `
         <div class="detail-header">
           <div>
             <h2>${r.state?.split('-').map(w=>w[0].toUpperCase()+w.slice(1)).join(' ')} ${r.cert?.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}</h2>
-            <a href="${r.url}" target="_blank" style="color:var(--accent-light);font-size:13px">${r.url}</a>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+              <a href="${r.url}" target="_blank" style="color:var(--accent-light);font-size:13px">${r.url}</a>
+              <span class="source-badge source-${src}">${src === 'live' ? '🌐 Live' : '📦 Payload'}</span>
+            </div>
           </div>
-          <button class="btn-icon" onclick="closeDetail()">✕</button>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm btn-secondary" onclick="downloadSingleMD('${r.state}','${r.cert}')" title="Download MD">📄</button>
+            <button class="btn-icon" onclick="closeDetail()">✕</button>
+          </div>
         </div>
 
         <div class="detail-section">
@@ -651,6 +795,61 @@
               <div style="font-size:12px;color:var(--text-dim)">On-page: ${op.total}/100</div>
             </div>
           </div>
+        </div>
+
+        <!-- DeepSeek AI Analysis -->
+        <div class="detail-section">
+          <h3>🤖 AI Analysis <span style="font-size:10px;color:var(--text-dim)">(DeepSeek)</span></h3>
+          ${state.deepseekLoading ? `
+            <div class="ai-card">
+              <div style="text-align:center;padding:20px;color:var(--purple)">
+                <div style="font-size:24px;animation:pulse 1s infinite">🧠</div>
+                <div style="margin-top:8px">Analyzing with DeepSeek AI...</div>
+              </div>
+            </div>
+          ` : ds && ds.available ? `
+            <div class="ai-card">
+              <h4>Assessment</h4>
+              <div class="ai-content">${ds.analysis?.overallAssessment || ''}</div>
+            </div>
+            ${ds.analysis?.quickWins ? `
+            <div class="ai-card">
+              <h4>⚡ Quick Wins</h4>
+              <ul class="ai-list">${ds.analysis.quickWins.map(w => `<li>${w}</li>`).join('')}</ul>
+            </div>` : ''}
+            ${ds.analysis?.h2Suggestions ? `
+            <div class="ai-card">
+              <h4>📝 Suggested H2s</h4>
+              <ul class="ai-list">${ds.analysis.h2Suggestions.map(h => `<li>${h}</li>`).join('')}</ul>
+            </div>` : ''}
+            ${ds.analysis?.faqSuggestions ? `
+            <div class="ai-card">
+              <h4>❓ Suggested FAQs</h4>
+              <ul class="ai-list">${ds.analysis.faqSuggestions.map(q => `<li>${q}</li>`).join('')}</ul>
+            </div>` : ''}
+            ${ds.analysis?.metaTitleSuggestion ? `
+            <div class="ai-card">
+              <h4>🏷️ Meta Suggestions</h4>
+              <div class="ai-content" style="margin-bottom:6px"><strong>Title:</strong> ${ds.analysis.metaTitleSuggestion}</div>
+              <div class="ai-content"><strong>Description:</strong> ${ds.analysis.metaDescSuggestion || ''}</div>
+            </div>` : ''}
+            ${ds.analysis?.competitorKeywords ? `
+            <div class="ai-card">
+              <h4>🎯 Competitor Keywords</h4>
+              <ul class="ai-list">${ds.analysis.competitorKeywords.map(k => `<li>${k}</li>`).join('')}</ul>
+            </div>` : ''}
+            ${ds.usage ? `<div style="font-size:10px;color:var(--text-dim);margin-top:4px">Tokens: ${ds.usage.total_tokens} | Model: ${ds.model}</div>` : ''}
+          ` : ds && !ds.available ? `
+            <div class="ai-card" style="border-color:var(--red)">
+              <div style="color:var(--red);font-size:13px">${ds.error || 'DeepSeek not available'}</div>
+            </div>
+            <button class="btn btn-sm btn-purple" onclick="runDeepSeek('${r.state}','${r.cert}')">Retry AI Analysis</button>
+          ` : `
+            <button class="btn btn-purple" onclick="runDeepSeek('${r.state}','${r.cert}')" ${!state.apiStatus.deepseek?'disabled title="Configure DeepSeek API key in Settings"':''}>
+              🧠 Run AI Analysis
+            </button>
+            ${!state.apiStatus.deepseek ? '<div style="font-size:11px;color:var(--text-dim);margin-top:4px">Add your DeepSeek API key in ⚙️ Settings first</div>' : ''}
+          `}
         </div>
 
         <div class="detail-section">
@@ -680,25 +879,9 @@
               `;
             }).join('')}
           </div>
-          ` : ah.keywords && ah.keywords.length > 0 ? `
-          <div style="margin-bottom: 12px">
-            <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px">Keywords found — movement tracking starts after 2nd scan</div>
-            ${ah.keywords.slice(0, 10).map(k => `
-              <div style="background: var(--surface2); border-radius: 6px; padding: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center">
-                <div style="flex: 1">
-                  <div style="font-size: 13px; color: var(--text); margin-bottom: 2px">${k.keyword}</div>
-                  <div style="font-size: 11px; color: var(--text-dim)">Vol: ${k.volume || 0} • Traffic: ${k.traffic || 0}</div>
-                </div>
-                <div style="text-align: right">
-                  <div style="font-size: 14px; font-weight: 700; color: var(--accent-light)">Pos #${k.position}</div>
-                </div>
-              </div>
-            `).join('')}
-          </div>
           ` : `
-          <div style="background: var(--surface2); border-radius: 8px; padding: 20px; text-align: center">
-            <div style="font-size: 14px; color: var(--text-dim); margin-bottom: 8px">No keyword data available</div>
-            <div style="font-size: 12px; color: var(--text-dim)">Ahrefs hasn't found organic keywords for this URL yet. The page may be new or not ranking.</div>
+          <div style="background: var(--surface2); border-radius: 8px; padding: 16px; text-align: center; color: var(--text-dim); font-size: 13px">
+            ${ah.available ? 'No keyword data yet' : 'Connect Ahrefs API for SERP data'}
           </div>
           `}
         </div>
@@ -706,22 +889,10 @@
         <div class="detail-section">
           <h3>Keyword Position Overview</h3>
           <div class="detail-grid" style="grid-template-columns: repeat(4, 1fr)">
-            <div class="detail-metric" style="border: 2px solid var(--green)">
-              <div class="label">Top 1</div>
-              <div class="value" style="color: var(--green)">${ah.keywordsTop1 || 0}</div>
-            </div>
-            <div class="detail-metric" style="border: 2px solid var(--cyan)">
-              <div class="label">Top 3</div>
-              <div class="value" style="color: var(--cyan)">${ah.keywordsTop3 || 0}</div>
-            </div>
-            <div class="detail-metric" style="border: 2px solid var(--yellow)">
-              <div class="label">Top 10</div>
-              <div class="value" style="color: var(--yellow)">${ah.keywordsTop10 || 0}</div>
-            </div>
-            <div class="detail-metric" style="border: 2px solid var(--blue)">
-              <div class="label">Top 100</div>
-              <div class="value" style="color: var(--blue)">${ah.keywordsTop100 || 0}</div>
-            </div>
+            <div class="detail-metric" style="border: 2px solid var(--green)"><div class="label">Top 1</div><div class="value" style="color: var(--green)">${ah.keywordsTop1 || 0}</div></div>
+            <div class="detail-metric" style="border: 2px solid var(--cyan)"><div class="label">Top 3</div><div class="value" style="color: var(--cyan)">${ah.keywordsTop3 || 0}</div></div>
+            <div class="detail-metric" style="border: 2px solid var(--yellow)"><div class="label">Top 10</div><div class="value" style="color: var(--yellow)">${ah.keywordsTop10 || 0}</div></div>
+            <div class="detail-metric" style="border: 2px solid var(--blue)"><div class="label">Top 100</div><div class="value" style="color: var(--blue)">${ah.keywordsTop100 || 0}</div></div>
           </div>
         </div>
 
@@ -729,10 +900,10 @@
           <h3>SEO Recommendations</h3>
           ${(op.recommendations || []).length > 0 ? `
           <div class="rec-summary">
-            <div class="rec-summary-title">${op.pointsToA > 0 ? `+${op.pointsToA} points needed to reach A` : 'On-page is perfect! Focus on off-page SEO below.'}</div>
-            <div class="rec-summary-sub">${op.recommendations.length} recommendation${op.recommendations.length > 1 ? 's' : ''} — fix the top ${Math.min(3, op.recommendations.length)} to get there fastest</div>
+            <div class="rec-summary-title">${op.pointsToA > 0 ? `+${op.pointsToA} points needed to reach A` : 'On-page is perfect!'}</div>
+            <div class="rec-summary-sub">${op.recommendations.length} recommendation${op.recommendations.length > 1 ? 's' : ''}</div>
           </div>
-          ${op.recommendations.map((rec, idx) => `
+          ${op.recommendations.map(rec => `
             <div class="rec-card ${rec.priority}">
               <div class="rec-header">
                 <span class="rec-category">${rec.priority === 'critical' ? '🔴' : rec.priority === 'high' ? '🟠' : rec.priority === 'medium' ? '🟡' : '🔵'} ${rec.category}</span>
@@ -745,19 +916,8 @@
           ` : `
           <div class="rec-summary">
             <div class="rec-summary-title" style="color:var(--green)">✓ On-page SEO is perfect (100/100)</div>
-            <div class="rec-summary-sub">Focus on off-page factors to improve overall ranking</div>
           </div>
           `}
-          ${(() => {
-            const offPageRecs = [];
-            if (!ah.available || (ah.keywordCount || 0) === 0) offPageRecs.push({priority:'high',category:'Keyword Visibility',action:'Ahrefs shows 0 keywords for this page. This may mean the page is new, not yet indexed, or not ranking for any terms. Ensure the page is submitted to Google Search Console and has quality backlinks pointing to it.',icon:'🟠'});
-            if ((ah.keywordCount || 0) > 0 && (ah.keywordsTop10 || 0) === 0) offPageRecs.push({priority:'high',category:'Rankings',action:'This page has ' + ah.keywordCount + ' keywords but none in the top 10. Focus on building backlinks and improving content depth to push rankings higher.',icon:'🟠'});
-            if (!ah.available || (ah.backlinks || 0) === 0) offPageRecs.push({priority:'high',category:'Backlinks',action:'No backlinks detected. Build quality backlinks through guest posting, local directories, and government/health resource pages that link to vital records information.',icon:'🟠'});
-            else if ((ah.referringDomains || 0) < 5) offPageRecs.push({priority:'medium',category:'Referring Domains',action:'Only ' + (ah.referringDomains||0) + ' referring domain(s). Aim for 10+ unique domains linking to this page for stronger authority signals.',icon:'🟡'});
-            if ((ah.organicTraffic || 0) < 50) offPageRecs.push({priority:'medium',category:'Organic Traffic',action:'Low organic traffic (' + (ah.organicTraffic||0) + ' visits/mo). Consider adding the page to your internal linking structure, sharing on social media, and targeting long-tail keywords in blog posts that link here.',icon:'🟡'});
-            offPageRecs.push({priority:'low',category:'Content Freshness',action:'Schedule quarterly content reviews to update fees, processing times, and requirements. Google rewards fresh, accurate content with better rankings.',icon:'🔵'});
-            return offPageRecs.map(r => '<div class="rec-card ' + r.priority + '"><div class="rec-header"><span class="rec-category">' + r.icon + ' ' + r.category + '</span><span class="rec-points">Off-page</span></div><div class="rec-action">' + r.action + '</div></div>').join('');
-          })()}
         </div>
 
         <div class="detail-section">
@@ -789,8 +949,6 @@
             <div class="detail-metric"><div class="label">Organic Traffic</div><div class="value">${ah.organicTraffic||0}</div></div>
             <div class="detail-metric"><div class="label">Backlinks</div><div class="value">${ah.backlinks||0}</div></div>
             <div class="detail-metric"><div class="label">Ref Domains</div><div class="value">${ah.referringDomains||0}</div></div>
-            <div class="detail-metric"><div class="label">Keywords</div><div class="value">${ah.keywordCount||(ah.organicKeywords||[]).length}</div></div>
-            <div class="detail-metric"><div class="label">Total Traffic</div><div class="value">${Math.round(ah.totalTraffic||0)}</div></div>
           </div>
         </div>` : ''}
 
@@ -808,7 +966,7 @@
         </div>
 
         <div class="detail-section">
-          <h3>H2 Headings</h3>
+          <h3>H2 Headings <span class="source-badge source-${src}" style="margin-left:6px">${src}</span></h3>
           <ul style="list-style:none">
             ${(op.meta?.h2s||[]).map(h => `<li style="padding:4px 0;font-size:13px;color:var(--text-dim)">• ${h}</li>`).join('')}
             ${(op.meta?.h2s||[]).length === 0 ? '<li style="color:var(--text-dim)">None found</li>' : ''}
@@ -825,7 +983,7 @@
       `;
     }
 
-    // ─── Login Handler ──────────────────────────────────────
+    // ─── Handlers ───────────────────────────────────────────
     async function handleLogin() {
       const username = document.getElementById('login-username').value;
       const password = document.getElementById('login-password').value;
@@ -838,7 +996,6 @@
       }
     }
 
-    // ─── Interactions ───────────────────────────────────────
     function toggleSort(col) {
       if (state.sort.col === col) state.sort.asc = !state.sort.asc;
       else { state.sort.col = col; state.sort.asc = true; }
@@ -848,6 +1005,8 @@
     function showDetail(s, cert) {
       const key = `${s}/${cert}`;
       const r = state.results[key];
+      state.deepseekResult = null;
+      state.deepseekLoading = false;
       if (r) { state.selectedPage = r; }
       else { state.selectedPage = { state: s, cert, url: `https://www.vitalrecordsonline.com/${s}/${cert}`, onPage: {scores:{},total:0,grade:'—',issues:[],meta:{}}, rating: {grade:'—'} }; }
       render();
@@ -855,19 +1014,20 @@
 
     function closeDetail() {
       state.selectedPage = null;
+      state.deepseekResult = null;
       render();
     }
 
     async function analyzeUnscored() {
       const unscored = state.pages.filter(p => !state.results[`${p.state}/${p.cert}`]);
       if (!unscored.length) return alert('All pages already analyzed!');
-      await analyzeSelected(unscored);
+      await runBatch(unscored);
     }
 
     async function analyzeFiltered() {
       const filtered = getFilteredPages();
       if (!filtered.length) return alert('No pages match current filters.');
-      await analyzeSelected(filtered);
+      await runBatch(filtered);
     }
 
     // ─── Start ──────────────────────────────────────────────

@@ -41,6 +41,7 @@ In the Railway dashboard, click on your service, then go to **Variables** tab. A
 | `PAYLOAD_PASSWORD` | *(your Payload CMS password)* |
 | `AHREFS_API_TOKEN` | *(your token, optional)* |
 | `SEMRUSH_API_KEY` | *(your key, optional)* |
+| `DEEPSEEK_API_KEY` | *(your key, optional — AI recommendations)* |
 
 Railway automatically provides `PORT` — you don't need to set it.
 
