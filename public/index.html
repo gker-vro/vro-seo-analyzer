@@ -378,7 +378,7 @@
       state.mdProgress.total = filtered.length;
 
       // Process in batches via SSE
-      const evtSource = new EventSource(`/api/markdown-all?states=${[...new Set(filtered.map(p=>p.state))].join(',')}&certs=${[...new Set(filtered.map(p=>p.cert))].join(',')}`);
+      const evtSource = new EventSource(`/api/markdown-all?token=${getAuthToken()}&states=${[...new Set(filtered.map(p=>p.state))].join(',')}&certs=${[...new Set(filtered.map(p=>p.cert))].join(',')}`);
 
       evtSource.onmessage = function(event) {
         const data = JSON.parse(event.data);

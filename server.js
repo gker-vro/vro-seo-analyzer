@@ -968,8 +968,13 @@ app.post('/api/login', (req, res) => {
 });
 
 // Apply auth middleware to all /api/* routes except /api/login
+// Also support ?token= query param for SSE/download endpoints that can't send headers
 app.use('/api/', (req, res, next) => {
   if (req.path === '/login') return next();
+  // If no Authorization header but token in query string, inject it as a header
+  if (!req.headers.authorization && req.query.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
   authMiddleware(req, res, next);
 });
 
