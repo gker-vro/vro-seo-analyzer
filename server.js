@@ -1056,6 +1056,13 @@ app.get('/api/analyze/:state/:cert', async (req, res) => {
     // 8. Combined rating
     const rating = computeFinalRating(onPage, ahrefs, semrush);
 
+    // 9. DeepSeek AI analysis (auto-run if API key is configured)
+    let deepseek = { available: false };
+    const dsKey = getSetting('deepseek_api_key', DEEPSEEK_KEY);
+    if (dsKey) {
+      deepseek = await runDeepSeekAnalysis({ state, cert, liveData, onPage });
+    }
+
     const result = {
       state,
       cert,
@@ -1065,6 +1072,7 @@ app.get('/api/analyze/:state/:cert', async (req, res) => {
       liveData: liveData.success ? { h2s: liveData.h2s, h3s: liveData.h3s, sections: liveData.sections, faqQuestions: liveData.faqQuestions, wordCount: liveData.wordCount } : null,
       ahrefs,
       semrush,
+      deepseek,
       rating,
       analyzedAt: new Date().toISOString()
     };
@@ -1127,7 +1135,18 @@ app.post('/api/analyze-batch', async (req, res) => {
       const semrush = await fetchSemrushData(liveUrl);
       const rating = computeFinalRating(onPage, ahrefs, semrush);
 
-      res.write(`data: ${JSON.stringify({ i, state, cert, url: liveUrl, onPage, ahrefs: { available: ahrefs.available, keywordsTop1: ahrefs.keywordsTop1, keywordsTop3: ahrefs.keywordsTop3, keywordsTop10: ahrefs.keywordsTop10, keywordCount: ahrefs.keywordCount }, semrush: { available: semrush.available }, rating, analyzedAt: new Date().toISOString() })}\n\n`);
+      // DeepSeek AI analysis (auto-run if configured)
+      let deepseek = { available: false };
+      const batchDsKey = getSetting('deepseek_api_key', DEEPSEEK_KEY);
+      if (batchDsKey) {
+        deepseek = await runDeepSeekAnalysis({ state, cert, liveData: batchLiveData, onPage });
+      }
+
+      // Save full result to disk
+      const fullResult = { state, cert, url: liveUrl, onPage, ahrefs, semrush, deepseek, rating, analyzedAt: new Date().toISOString() };
+      savePageResult(`${state}/${cert}`, fullResult);
+
+      res.write(`data: ${JSON.stringify({ i, state, cert, url: liveUrl, onPage, ahrefs: { available: ahrefs.available, keywordsTop1: ahrefs.keywordsTop1, keywordsTop3: ahrefs.keywordsTop3, keywordsTop10: ahrefs.keywordsTop10, keywordCount: ahrefs.keywordCount }, semrush: { available: semrush.available }, deepseek: { available: deepseek.available, quickWins: deepseek.analysis?.quickWins }, rating, analyzedAt: new Date().toISOString() })}\n\n`);
     } catch (e) {
       res.write(`data: ${JSON.stringify({ i, state, cert, error: e.message })}\n\n`);
     }

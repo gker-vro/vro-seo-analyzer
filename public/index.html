@@ -708,7 +708,7 @@
                         <td class="center">${r ? r.onPage?.meta?.wordCount || '—' : '—'}</td>
                         <td class="center">${r ? r.onPage?.meta?.faqCount || '0' : '—'}</td>
                         <td class="center">${r ? `<span style="color:${r.onPage?.issues?.filter(i=>i.severity==='critical').length>0?'var(--red)':'var(--text-dim)'}">${r.onPage?.issues?.length || 0}</span>` : '—'}</td>
-                        <td>${src ? `<span class="source-badge source-${src}">${src}</span>` : '—'}</td>
+                        <td>${src ? `<span class="source-badge source-${src}">${src}</span>` : '—'}${r?.deepseek?.available ? ' <span class="source-badge" style="background:rgba(168,85,247,0.2);color:var(--purple)">🧠 AI</span>' : ''}</td>
                         <td>
                           <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();analyzeSingle('${p.state}','${p.cert}').then(()=>render())">Scan</button>
                         </td>
@@ -843,12 +843,12 @@
             <div class="ai-card" style="border-color:var(--red)">
               <div style="color:var(--red);font-size:13px">${ds.error || 'DeepSeek not available'}</div>
             </div>
-            <button class="btn btn-sm btn-purple" onclick="runDeepSeek('${r.state}','${r.cert}')">Retry AI Analysis</button>
+            <button class="btn btn-sm btn-purple" onclick="runDeepSeek('${r.state}','${r.cert}')">🔄 Retry AI Analysis</button>
           ` : `
             <button class="btn btn-purple" onclick="runDeepSeek('${r.state}','${r.cert}')" ${!state.apiStatus.deepseek?'disabled title="Configure DeepSeek API key in Settings"':''}>
-              🧠 Run AI Analysis
+              🔄 Re-run AI Analysis
             </button>
-            ${!state.apiStatus.deepseek ? '<div style="font-size:11px;color:var(--text-dim);margin-top:4px">Add your DeepSeek API key in ⚙️ Settings first</div>' : ''}
+            <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${!state.apiStatus.deepseek ? 'Add your DeepSeek API key in ⚙️ Settings first' : 'AI analysis runs automatically during analysis. Click to refresh.'}</div>
           `}
         </div>
 
@@ -1005,10 +1005,16 @@
     function showDetail(s, cert) {
       const key = `${s}/${cert}`;
       const r = state.results[key];
-      state.deepseekResult = null;
       state.deepseekLoading = false;
-      if (r) { state.selectedPage = r; }
-      else { state.selectedPage = { state: s, cert, url: `https://www.vitalrecordsonline.com/${s}/${cert}`, onPage: {scores:{},total:0,grade:'—',issues:[],meta:{}}, rating: {grade:'—'} }; }
+      if (r) {
+        state.selectedPage = r;
+        // Auto-populate DeepSeek results if available from analysis
+        state.deepseekResult = (r.deepseek && r.deepseek.available) ? r.deepseek : null;
+      }
+      else {
+        state.selectedPage = { state: s, cert, url: `https://www.vitalrecordsonline.com/${s}/${cert}`, onPage: {scores:{},total:0,grade:'—',issues:[],meta:{}}, rating: {grade:'—'} };
+        state.deepseekResult = null;
+      }
       render();
     }
 
