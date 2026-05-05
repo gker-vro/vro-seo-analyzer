@@ -653,13 +653,28 @@ async function scrapeLivePage(url) {
     const bodyText = bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     const wordCount = bodyText.split(/\s+/).filter(Boolean).length;
 
-    // Links
-    const linkRegex = /href=["']([\s\S]*?)["']/gi;
-    const allLinks = [];
-    let lm;
-    while ((lm = linkRegex.exec(html)) !== null) allLinks.push(lm[1]);
-    const internalLinks = allLinks.filter(l => l.includes('vitalrecordsonline.com') || (l.startsWith('/') && !l.startsWith('//')));
-    const externalLinks = allLinks.filter(l => l.startsWith('http') && !l.includes('vitalrecordsonline.com'));
+    // Links — capture both href and anchor text from body (excluding nav/footer)
+    const anchorRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const linkPairsAll = [];
+    let am0;
+    while ((am0 = anchorRegex.exec(bodyHtml)) !== null) {
+      const url = am0[1].trim();
+      const text = am0[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!url || url.startsWith('#') || url.startsWith('mailto:') || url.startsWith('tel:') || url.startsWith('javascript:')) continue;
+      linkPairsAll.push({ url, text });
+    }
+    // Dedupe by url+text
+    const seenLinks = new Set();
+    const linkPairs = linkPairsAll.filter(l => {
+      const key = `${l.url}|${l.text}`;
+      if (seenLinks.has(key)) return false;
+      seenLinks.add(key);
+      return true;
+    });
+    const internalLinkPairs = linkPairs.filter(l => l.url.includes('vitalrecordsonline.com') || (l.url.startsWith('/') && !l.url.startsWith('//')));
+    const externalLinkPairs = linkPairs.filter(l => l.url.startsWith('http') && !l.url.includes('vitalrecordsonline.com'));
+    const internalLinks = internalLinkPairs.map(l => l.url);
+    const externalLinks = externalLinkPairs.map(l => l.url);
 
     // Images
     const imgRegex = /<img[^>]*src=["']([^"']+)["'][^>]*(?:alt=["']([^"']*)["'])?[^>]*>/gi;
@@ -712,6 +727,8 @@ async function scrapeLivePage(url) {
       wordCount,
       internalLinkCount: internalLinks.length,
       externalLinkCount: externalLinks.length,
+      internalLinkPairs,
+      externalLinkPairs,
       images,
       faqQuestions,
       faqCount: faqQuestions.length,
@@ -724,41 +741,163 @@ async function scrapeLivePage(url) {
 }
 
 // ─── Markdown Generation ──────────────────────────────────────
-function generatePageMarkdown(state, cert, liveData, payloadMeta) {
-  const stateName = state.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
-  const certName = cert.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  const url = `https://www.vitalrecordsonline.com/${state}/${cert}`;
+const CATEGORY_DEFS = [
+  { slug: 'faqs',            file: '06-faqs.md',            label: 'FAQs',            test: t => /\bfaqs?\b|frequent|questions?\b/i.test(t) },
+  { slug: 'notary',           file: '03-notary.md',           label: 'Notary',           test: t => /\bnotar(y|i[zs]ation)?\b|\bsignature\b|\bsigned\b/i.test(t) },
+  { slug: 'id-requirements',  file: '01-id-requirements.md',  label: 'ID Requirements',  test: t => /\b(id|identification|identity)\b|\b(documents?\s+(required|needed))|valid\s+id|government[\s-]?issued/i.test(t) },
+  { slug: 'relationship',     file: '02-relationship.md',     label: 'Relationship & Eligibility', test: t => /\b(who\s+can|eligibility|eligible|relationship|qualify|qualifies|authorized|requestor|applicant|tier|immediate\s+family)\b/i.test(t) },
+  { slug: 'fees',             file: '04-fees.md',             label: 'Fees',             test: t => /\b(fee|fees|cost|costs|price|pricing|charge|payment)\b|\$/i.test(t) },
+  { slug: 'processing-time',  file: '05-processing-time.md',  label: 'Processing Time',  test: t => /\b(processing|process\s+time|turnaround|delivery|deliver|shipping|ship|expedite|expedited|how\s+long|wait\s+time|business\s+days?)\b/i.test(t) },
+];
 
-  let md = `# ${stateName} ${certName}\n\n`;
+function classifySection(title) {
+  for (const cat of CATEGORY_DEFS) if (cat.test(title || '')) return cat.slug;
+  return 'overview';
+}
+
+function titleCase(s) {
+  return s.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+
+function generateOverviewMarkdown(stateName, certName, url, liveData, payloadMeta, overviewSections) {
+  let md = `# ${stateName} ${certName} — Overview\n\n`;
   md += `**URL:** ${url}\n`;
   md += `**Meta Title:** ${liveData.metaTitle || payloadMeta?.title || 'N/A'}\n`;
   md += `**Meta Description:** ${liveData.metaDesc || payloadMeta?.description || 'N/A'}\n`;
   md += `**Word Count:** ${liveData.wordCount || 0}\n`;
+  md += `**H1:** ${(liveData.h1s || [])[0] || 'N/A'}\n`;
   md += `**FAQ Count:** ${liveData.faqCount || 0}\n`;
   md += `**Internal Links:** ${liveData.internalLinkCount || 0}\n`;
+  md += `**External Links:** ${liveData.externalLinkCount || 0}\n`;
   md += `**Images:** ${(liveData.images || []).length}\n\n`;
   md += `---\n\n`;
-
-  // H2 sections with content
-  if (liveData.sections && liveData.sections.length > 0) {
-    for (const section of liveData.sections) {
-      md += `## ${section.title}\n\n`;
-      md += `${section.content}\n\n`;
+  if (overviewSections.length > 0) {
+    for (const s of overviewSections) {
+      md += `## ${s.title}\n\n${s.content}\n\n`;
     }
-  } else if (liveData.h2s && liveData.h2s.length > 0) {
-    md += `## Headings\n\n`;
-    liveData.h2s.forEach(h => { md += `- ${h}\n`; });
-    md += '\n';
+  } else {
+    md += `_No overview sections were classified to this category. See sibling files for ID requirements, fees, processing time, etc._\n\n`;
   }
-
-  // FAQs
-  if (liveData.faqQuestions && liveData.faqQuestions.length > 0) {
-    md += `## FAQ\n\n`;
-    liveData.faqQuestions.forEach((q, i) => { md += `### ${i + 1}. ${q}\n\n`; });
-  }
-
-  md += `---\n*Generated: ${new Date().toISOString().split('T')[0]} by VRO SEO Analyzer*\n`;
   return md;
+}
+
+function generateSectionsMarkdown(stateName, certName, label, sections) {
+  let md = `# ${stateName} ${certName} — ${label}\n\n`;
+  if (sections.length === 0) {
+    md += `_No sections matched this category for this page._\n`;
+    return md;
+  }
+  for (const s of sections) {
+    md += `## ${s.title}\n\n${s.content}\n\n`;
+  }
+  return md;
+}
+
+function generateFaqMarkdown(stateName, certName, faqQuestions, faqSections) {
+  let md = `# ${stateName} ${certName} — FAQs\n\n`;
+  const all = [];
+  faqQuestions.forEach(q => all.push({ question: q, answer: '' }));
+  // Append any FAQ-classified H2 sections as additional Q&A blocks if not already covered
+  for (const s of faqSections) {
+    if (!all.find(a => a.question.toLowerCase() === (s.title || '').toLowerCase())) {
+      all.push({ question: s.title, answer: s.content });
+    }
+  }
+  if (all.length === 0) {
+    md += `_No FAQs detected on this page._\n`;
+    return md;
+  }
+  all.forEach((f, i) => {
+    md += `### ${i + 1}. ${f.question}\n\n`;
+    if (f.answer) md += `${f.answer}\n\n`;
+  });
+  return md;
+}
+
+function generateLinksMarkdown(stateName, certName, internalPairs, externalPairs) {
+  let md = `# ${stateName} ${certName} — Links\n\n`;
+  md += `## Internal Links (${internalPairs.length})\n\n`;
+  if (internalPairs.length === 0) {
+    md += `_None_\n\n`;
+  } else {
+    for (const l of internalPairs) {
+      const desc = l.text || '(no anchor text)';
+      md += `- [${desc}](${l.url})\n`;
+    }
+    md += `\n`;
+  }
+  md += `## External Links (${externalPairs.length})\n\n`;
+  if (externalPairs.length === 0) {
+    md += `_None_\n\n`;
+  } else {
+    for (const l of externalPairs) {
+      const desc = l.text || '(no anchor text)';
+      md += `- [${desc}](${l.url})\n`;
+    }
+    md += `\n`;
+  }
+  return md;
+}
+
+function generateServicesCostsMarkdown(stateName, certName) {
+  return `# ${stateName} ${certName} — VRO Services & Costs\n\n` +
+`## What Vital Records Online (VRO) Does\n\n` +
+`Vital Records Online is an independent ordering-assistance service that helps people request certified copies of vital records (birth, death, marriage, and divorce certificates) from the issuing state or county vital records office. VRO is **not** a government agency and is not affiliated with any state or federal vital records office.\n\n` +
+`Our service handles the parts of the process that most people find frustrating: figuring out which agency to apply to, completing the correct application, gathering the right supporting documents, formatting the request to that agency's specifications, reviewing for errors before submission, and tracking the order through fulfillment.\n\n` +
+`## What's Included\n\n` +
+`- Application form completion and review\n` +
+`- Document checklist and ID-requirement guidance specific to ${stateName}\n` +
+`- Pre-submission error check (a leading cause of rejections)\n` +
+`- Order tracking and customer support before, during, and after submission\n` +
+`- Secure handling of personal information (PII)\n\n` +
+`## VRO Service Fee\n\n` +
+`VRO charges a service fee in addition to the state/county-issued government fee. The service fee covers application preparation, review, and support — it does **not** include the official cost of the certificate itself, which is paid to the issuing agency.\n\n` +
+`Government fees vary by state and certificate type. Expedited shipping, additional copies, and apostille services are available at additional cost where supported.\n\n` +
+`## What VRO Does Not Do\n\n` +
+`- Issue certificates directly (only the state/county vital records office can do that)\n` +
+`- Guarantee approval of any individual application (that decision is made by the issuing agency)\n` +
+`- Provide legal advice on the use of vital records\n\n` +
+`## Why Customers Choose VRO\n\n` +
+`- One streamlined online form instead of navigating multiple government websites\n` +
+`- Plain-language guidance on eligibility, ID, and notarization rules\n` +
+`- Live customer support throughout the process\n` +
+`- Secure, encrypted handling of sensitive identification documents\n\n` +
+`---\n_This file is a static overview of VRO services and is included with every state/certificate export. For state-specific fees, eligibility, and processing time, see the sibling files in this folder._\n`;
+}
+
+function generateCategoryMarkdownFiles(state, cert, liveData, payloadMeta) {
+  const stateName = titleCase(state);
+  const certName = titleCase(cert);
+  const url = `https://www.vitalrecordsonline.com/${state}/${cert}`;
+
+  // Bucket sections by category
+  const buckets = { overview: [], 'id-requirements': [], relationship: [], notary: [], fees: [], 'processing-time': [], faqs: [] };
+  for (const s of (liveData.sections || [])) {
+    const cat = classifySection(s.title);
+    (buckets[cat] || (buckets[cat] = [])).push(s);
+  }
+
+  const files = {};
+  files['00-overview.md']         = generateOverviewMarkdown(stateName, certName, url, liveData, payloadMeta, buckets.overview);
+  files['01-id-requirements.md']  = generateSectionsMarkdown(stateName, certName, 'ID Requirements',     buckets['id-requirements']);
+  files['02-relationship.md']     = generateSectionsMarkdown(stateName, certName, 'Relationship & Eligibility', buckets.relationship);
+  files['03-notary.md']           = generateSectionsMarkdown(stateName, certName, 'Notary',              buckets.notary);
+  files['04-fees.md']             = generateSectionsMarkdown(stateName, certName, 'Fees',                buckets.fees);
+  files['05-processing-time.md']  = generateSectionsMarkdown(stateName, certName, 'Processing Time',     buckets['processing-time']);
+  files['06-faqs.md']             = generateFaqMarkdown(stateName, certName, liveData.faqQuestions || [], buckets.faqs);
+  files['07-links.md']            = generateLinksMarkdown(stateName, certName, liveData.internalLinkPairs || [], liveData.externalLinkPairs || []);
+  files['08-services-costs.md']   = generateServicesCostsMarkdown(stateName, certName);
+
+  // Append generated-at footer
+  const footer = `\n---\n*Generated: ${new Date().toISOString().split('T')[0]} by VRO SEO Analyzer*\n`;
+  for (const k of Object.keys(files)) files[k] += footer;
+  return files;
+}
+
+// Backward-compatible single-file MD (used by single-page download as a flat fallback)
+function generatePageMarkdown(state, cert, liveData, payloadMeta) {
+  const files = generateCategoryMarkdownFiles(state, cert, liveData, payloadMeta);
+  return Object.entries(files).map(([name, content]) => `<!-- FILE: ${name} -->\n${content}`).join('\n\n');
 }
 
 // ─── DeepSeek AI Analysis ─────────────────────────────────────
@@ -1226,13 +1365,13 @@ app.get('/api/scrape/:state/:cert', async (req, res) => {
 });
 
 // ─── Generate Markdown ────────────────────────────────────────
+// Returns JSON with one file per category — client zips into state/cert/NN-category.md
 app.get('/api/markdown/:state/:cert', async (req, res) => {
   const { state, cert } = req.params;
   const url = `https://www.vitalrecordsonline.com/${state}/${cert}`;
   const liveData = await scrapeLivePage(url);
   if (!liveData.success) return res.status(500).json({ error: liveData.error });
 
-  // Also get payload meta
   let payloadMeta = {};
   try {
     const fullUrl = `/${state}/${cert}`;
@@ -1240,22 +1379,22 @@ app.get('/api/markdown/:state/:cert', async (req, res) => {
     if (pageSearch.docs?.length) payloadMeta = pageSearch.docs[0].meta || {};
   } catch(e) {}
 
-  const md = generatePageMarkdown(state, cert, liveData, payloadMeta);
-  const filename = `${state}-${cert}.md`;
-  res.setHeader('Content-Type', 'text/markdown');
-  res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
-  res.send(md);
+  const filesMap = generateCategoryMarkdownFiles(state, cert, liveData, payloadMeta);
+  const files = Object.entries(filesMap).map(([name, content]) => ({
+    path: `${state}/${cert}/${name}`,
+    content
+  }));
+  res.json({ state, cert, files });
 });
 
-// Generate all MD files as JSON (client creates zip)
+// Stream all MD files as SSE — emits one event per page with an array of category files
 app.get('/api/markdown-all', async (req, res) => {
-  const files = {};
   const states = req.query.states ? req.query.states.split(',') : STATES;
   const certs = req.query.certs ? req.query.certs.split(',') : CERTS;
 
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
 
-  let total = states.length * certs.length;
+  const total = states.length * certs.length;
   let done = 0;
 
   for (const state of states) {
@@ -1264,15 +1403,18 @@ app.get('/api/markdown-all', async (req, res) => {
       try {
         const liveData = await scrapeLivePage(url);
         if (liveData.success) {
-          const md = generatePageMarkdown(state, cert, liveData, {});
-          res.write(`data: ${JSON.stringify({ state, cert, filename: `${state}/${cert}.md`, content: md, done: ++done, total })}\n\n`);
+          const filesMap = generateCategoryMarkdownFiles(state, cert, liveData, {});
+          const files = Object.entries(filesMap).map(([name, content]) => ({
+            path: `${state}/${cert}/${name}`,
+            content
+          }));
+          res.write(`data: ${JSON.stringify({ state, cert, files, done: ++done, total })}\n\n`);
         } else {
           res.write(`data: ${JSON.stringify({ state, cert, error: liveData.error, done: ++done, total })}\n\n`);
         }
       } catch(e) {
         res.write(`data: ${JSON.stringify({ state, cert, error: e.message, done: ++done, total })}\n\n`);
       }
-      // Small delay to avoid hammering the server
       await new Promise(r => setTimeout(r, 300));
     }
   }

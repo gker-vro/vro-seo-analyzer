@@ -364,8 +364,28 @@
     }
 
     // ─── MD Download ────────────────────────────────────────
+    // Single page → fetch JSON of all category files, zip as state/cert/NN-category.md
     async function downloadSingleMD(s, cert) {
-      window.open(`/api/markdown/${s}/${cert}?token=${getAuthToken()}`, '_blank');
+      try {
+        const res = await fetch(`/api/markdown/${s}/${cert}?token=${getAuthToken()}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          alert(`Error: ${err.error || res.statusText}`);
+          return;
+        }
+        const data = await res.json();
+        const zip = new JSZip();
+        for (const f of (data.files || [])) zip.file(f.path, f.content);
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${s}-${cert}-md.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch(e) {
+        alert(`Download failed: ${e.message}`);
+      }
     }
 
     async function downloadAllMD() {
@@ -377,14 +397,12 @@
       const filtered = getFilteredPages();
       state.mdProgress.total = filtered.length;
 
-      // Process in batches via SSE
       const evtSource = new EventSource(`/api/markdown-all?token=${getAuthToken()}&states=${[...new Set(filtered.map(p=>p.state))].join(',')}&certs=${[...new Set(filtered.map(p=>p.cert))].join(',')}`);
 
       evtSource.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.complete) {
           evtSource.close();
-          // Generate and download zip
           zip.generateAsync({ type: 'blob' }).then(blob => {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -397,8 +415,8 @@
           });
           return;
         }
-        if (data.content) {
-          zip.file(data.filename, data.content);
+        if (Array.isArray(data.files)) {
+          for (const f of data.files) zip.file(f.path, f.content);
         }
         state.mdProgress.done = data.done;
         state.mdProgress.status = `${data.state}/${data.cert}` + (data.error ? ` (error: ${data.error})` : '');
