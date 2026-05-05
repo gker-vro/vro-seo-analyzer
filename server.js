@@ -622,6 +622,57 @@ function extractTagContent(html, tag) {
   return results;
 }
 
+function decodeEntities(s) {
+  return s
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'").replace(/&apos;/g, "'")
+    .replace(/&mdash;/g, '—').replace(/&ndash;/g, '–').replace(/&hellip;/g, '…');
+}
+
+// Convert a chunk of HTML into a readable Markdown string. Used for section content
+// so that <ul>/<li>, <p>, <h3>, <strong>, <a> survive the strip step instead of
+// collapsing into a single paragraph.
+function htmlToMarkdown(html) {
+  let s = html;
+  // Strip noise that may have been left inside the section
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
+  // Inline emphasis
+  s = s.replace(/<\/?(?:strong|b)\b[^>]*>/gi, '**');
+  s = s.replace(/<\/?(?:em|i)\b[^>]*>/gi, '*');
+  // Anchors → [text](url)
+  s = s.replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, url, text) => {
+    const t = text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    return t ? `[${t}](${url})` : url;
+  });
+  // Sub-headings within a section
+  s = s.replace(/<h3\b[^>]*>([\s\S]*?)<\/h3>/gi, '\n\n### $1\n\n');
+  s = s.replace(/<h4\b[^>]*>([\s\S]*?)<\/h4>/gi, '\n\n#### $1\n\n');
+  s = s.replace(/<h5\b[^>]*>([\s\S]*?)<\/h5>/gi, '\n\n##### $1\n\n');
+  // Lists — emit one bullet per <li>; preserve numbering within <ol>
+  s = s.replace(/<ol\b[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner) => {
+    let n = 0;
+    return '\n' + inner.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_, li) => `\n${++n}. ${li.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}`) + '\n';
+  });
+  s = s.replace(/<ul\b[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner) => {
+    return '\n' + inner.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_, li) => `\n- ${li.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}`) + '\n';
+  });
+  // Any leftover <li> outside a recognized list
+  s = s.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_, li) => `\n- ${li.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}`);
+  // Block boundaries
+  s = s.replace(/<\/p>/gi, '\n\n').replace(/<p\b[^>]*>/gi, '');
+  s = s.replace(/<br\s*\/?>/gi, '\n');
+  s = s.replace(/<\/div>/gi, '\n').replace(/<div\b[^>]*>/gi, '');
+  // Drop everything else
+  s = s.replace(/<[^>]+>/g, ' ');
+  s = decodeEntities(s);
+  // Whitespace cleanup — keep newlines, collapse spaces/tabs
+  s = s.replace(/[ \t]+/g, ' ')
+       .replace(/ *\n */g, '\n')
+       .replace(/\n{3,}/g, '\n\n')
+       .trim();
+  return s;
+}
+
 async function scrapeLivePage(url) {
   try {
     const res = await fetch(url, {
@@ -703,7 +754,7 @@ async function scrapeLivePage(url) {
       if (text && text.includes('?') && !faqQuestions.includes(text)) faqQuestions.push(text);
     }
 
-    // Extract sections (H2 + content until next H2)
+    // Extract sections (H2 + content until next H2) — preserve list/heading/link structure as markdown
     const sections = [];
     const h2Positions = [];
     const h2Regex = /<h2[^>]*>([\s\S]*?)<\/h2>/gi;
@@ -715,8 +766,7 @@ async function scrapeLivePage(url) {
       const start = h2Positions[i].endIndex;
       const end = i + 1 < h2Positions.length ? h2Positions[i + 1].index : bodyHtml.length;
       const sectionHtml = bodyHtml.substring(start, end);
-      const sectionText = sectionHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      sections.push({ title: h2Positions[i].title, content: sectionText });
+      sections.push({ title: h2Positions[i].title, content: htmlToMarkdown(sectionHtml) });
     }
 
     return {
@@ -840,6 +890,11 @@ function generateLinksMarkdown(stateName, certName, internalPairs, externalPairs
 }
 
 function generateServicesCostsMarkdown(stateName, certName) {
+  const fee = (process.env.VRO_SERVICE_FEE || '').trim();
+  const feeLine = fee
+    ? `**VRO service fee:** ${fee} (charged once per order, separate from any government fee).`
+    : `**VRO service fee:** see vitalrecordsonline.com for current pricing — varies by service tier and add-ons.`;
+
   return `# ${stateName} ${certName} — VRO Services & Costs\n\n` +
 `## What Vital Records Online (VRO) Does\n\n` +
 `Vital Records Online is an independent ordering-assistance service that helps people request certified copies of vital records (birth, death, marriage, and divorce certificates) from the issuing state or county vital records office. VRO is **not** a government agency and is not affiliated with any state or federal vital records office.\n\n` +
@@ -851,7 +906,8 @@ function generateServicesCostsMarkdown(stateName, certName) {
 `- Order tracking and customer support before, during, and after submission\n` +
 `- Secure handling of personal information (PII)\n\n` +
 `## VRO Service Fee\n\n` +
-`VRO charges a service fee in addition to the state/county-issued government fee. The service fee covers application preparation, review, and support — it does **not** include the official cost of the certificate itself, which is paid to the issuing agency.\n\n` +
+`${feeLine}\n\n` +
+`This fee covers application preparation, review, and support — it does **not** include the official cost of the certificate itself, which is paid directly to the issuing agency.\n\n` +
 `Government fees vary by state and certificate type. Expedited shipping, additional copies, and apostille services are available at additional cost where supported.\n\n` +
 `## What VRO Does Not Do\n\n` +
 `- Issue certificates directly (only the state/county vital records office can do that)\n` +
