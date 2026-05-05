@@ -704,6 +704,33 @@ async function scrapeLivePage(url) {
     const bodyText = bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     const wordCount = bodyText.split(/\s+/).filter(Boolean).length;
 
+    // VRO service fee — try multiple patterns the marketing page uses
+    let vroFee = null;
+    let vroFeeContext = null;
+    // 1) "Starting from $XX" hero block
+    const startingFromMatch = bodyHtml.match(/Starting\s+from[\s\S]{0,200}?\$([0-9]+(?:\.[0-9]{2})?)([^<]{0,80}?)</i);
+    if (startingFromMatch) {
+      vroFee = `$${startingFromMatch[1]}`;
+      const tail = (startingFromMatch[2] || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+      vroFeeContext = `Starting from ${vroFee}${tail ? ' ' + tail : ' + state fees'}`.trim();
+    }
+    // 2) "VRO's $XX filing fee" strong line
+    if (!vroFee) {
+      const filingMatch = bodyHtml.match(/VRO['’']?s?\s*\$([0-9]+(?:\.[0-9]{2})?)\s*filing\s*fee/i);
+      if (filingMatch) {
+        vroFee = `$${filingMatch[1]}`;
+        vroFeeContext = `VRO's ${vroFee} filing fee`;
+      }
+    }
+    // 3) Fallback HTML-entity-encoded variant ("VRO&#x27;s $29 filing fee")
+    if (!vroFee) {
+      const filingEntMatch = bodyHtml.match(/VRO(?:&#x27;|&#39;|&apos;)s?\s*\$([0-9]+(?:\.[0-9]{2})?)\s*filing\s*fee/i);
+      if (filingEntMatch) {
+        vroFee = `$${filingEntMatch[1]}`;
+        vroFeeContext = `VRO's ${vroFee} filing fee`;
+      }
+    }
+
     // Links — capture both href and anchor text from body (excluding nav/footer)
     const anchorRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     const linkPairsAll = [];
@@ -783,6 +810,8 @@ async function scrapeLivePage(url) {
       faqQuestions,
       faqCount: faqQuestions.length,
       sections,
+      vroFee,
+      vroFeeContext,
       fullText: bodyText.substring(0, 10000)
     };
   } catch(e) {
@@ -889,11 +918,18 @@ function generateLinksMarkdown(stateName, certName, internalPairs, externalPairs
   return md;
 }
 
-function generateServicesCostsMarkdown(stateName, certName) {
-  const fee = (process.env.VRO_SERVICE_FEE || '').trim();
-  const feeLine = fee
-    ? `**VRO service fee:** ${fee} (charged once per order, separate from any government fee).`
-    : `**VRO service fee:** see vitalrecordsonline.com for current pricing — varies by service tier and add-ons.`;
+function generateServicesCostsMarkdown(stateName, certName, liveData) {
+  const scrapedFee = liveData && liveData.vroFee;
+  const scrapedContext = liveData && liveData.vroFeeContext;
+  const envFee = (process.env.VRO_SERVICE_FEE || '').trim();
+  let feeLine;
+  if (scrapedFee) {
+    feeLine = `**VRO service fee:** ${scrapedFee}${scrapedContext ? ` (${scrapedContext})` : ''} — charged once per order, separate from the state/government fee.`;
+  } else if (envFee) {
+    feeLine = `**VRO service fee:** ${envFee} — charged once per order, separate from any government fee.`;
+  } else {
+    feeLine = `**VRO service fee:** see vitalrecordsonline.com for current pricing — varies by service tier and add-ons.`;
+  }
 
   return `# ${stateName} ${certName} — VRO Services & Costs\n\n` +
 `## What Vital Records Online (VRO) Does\n\n` +
@@ -942,7 +978,7 @@ function generateCategoryMarkdownFiles(state, cert, liveData, payloadMeta) {
   files['05-processing-time.md']  = generateSectionsMarkdown(stateName, certName, 'Processing Time',     buckets['processing-time']);
   files['06-faqs.md']             = generateFaqMarkdown(stateName, certName, liveData.faqQuestions || [], buckets.faqs);
   files['07-links.md']            = generateLinksMarkdown(stateName, certName, liveData.internalLinkPairs || [], liveData.externalLinkPairs || []);
-  files['08-services-costs.md']   = generateServicesCostsMarkdown(stateName, certName);
+  files['08-services-costs.md']   = generateServicesCostsMarkdown(stateName, certName, liveData);
 
   // Append generated-at footer
   const footer = `\n---\n*Generated: ${new Date().toISOString().split('T')[0]} by VRO SEO Analyzer*\n`;
